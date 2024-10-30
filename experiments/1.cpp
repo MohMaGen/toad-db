@@ -63,7 +63,5 @@ int main() {
     std::cout << "vector: " << to_string(view) << std::endl;
 
 
-
-
     return 0;
 }

@@ -200,6 +200,59 @@ namespace toad_db {
             return false;
         }
 
+        /**
+         * Get size in bytes of the counter.
+         * 
+         * There counter is the any value representing count, or length, or size
+         * of smth.
+         * 
+         * @param max_value - max value that counter can be.
+         * @return size of the counter.
+         **/
+        static constexpr size_t counter_size_of(size_t max_value) {
+            using namespace types;
+
+            if (max_value <= 0xFF)
+                return sizeof(U8);
+
+            if (max_value <= 0xFFFF) 
+                return sizeof(U16);
+
+            return sizeof(U32);
+        }
+
+        /**
+         * Set value of the counter int data array.
+         * @see counter_size_of
+         *
+         * @param data - data at start which counter is destinated.
+         * @param max_value - max value that counter can be.
+         * @param value - new value of the counter.
+         **/
+        static constexpr void set_counter(char *data, size_t max_value, size_t value) {
+            using namespace types;
+
+            if (max_value <= 0xFF)           *(U8*)data = (U8)value;
+            else if (max_value <= 0xFFFF)    *(U16*)data = (U16)value;
+            else                             *(U32*)data = (U32)value;
+        }
+
+        /**
+         * Get value of the counter int data array.
+         * @see counter_size_of
+         *
+         * @param data - data at start which counter is destinated.
+         * @param max_value - max value that counter can be.
+         * @return value of the counter.
+         **/
+        static constexpr size_t get_counter(char *data, size_t max_value) {
+            using namespace types;
+
+            if (max_value <= 0xFF)           return (size_t)*(U8*)data;
+            else if (max_value <= 0xFFFF)    return (size_t)*(U16*)data;
+            else                             return (size_t)*(U32*)data;
+        }
+
 
         /**
          * Field of the complex domain (Mul or Add).
@@ -221,7 +274,7 @@ namespace toad_db {
          * Data for Array variant.
          **/
         struct Array_Data {
-            types::U64 len;
+            types::U64 capacity;
             Domain_Idx idx;
         };
 
@@ -293,7 +346,7 @@ namespace toad_db {
                                         Domain_Idx elem_idx, size_t len) {
             domain_name = name;
             variant     = Variant((char)Variant::Array + (char)array_variant);
-            array.len   = len;
+            array.capacity   = len;
             array.idx   = elem_idx;
         }
 
@@ -389,7 +442,7 @@ namespace toad_db {
 
             case Variant::Array: {
                 size_t size_of_elem = (*domains)[array.idx].size_of();
-                return size_of_elem * array.len;
+                return size_of_elem * array.capacity + counter_size_of(array.capacity);
             }
 
             case Variant::Add: {
@@ -400,13 +453,8 @@ namespace toad_db {
                     size_t curr = (*domains)[field.domain_idx].size_of();
                     size = curr > size ? curr : size;
                 }
-                const size_t fields_size = complex_fields.size();
-
-                if (fields_size <= 0xFF) {
-                    size += sizeof(U8);
-                } else if (fields_size <= 0xFFFF) {
-                    size += sizeof(U16);
-                }
+                const size_t fields_count = complex_fields.size();
+                size += counter_size_of(fields_count); 
 
                 return size;
             }
@@ -462,6 +510,7 @@ namespace toad_db {
 
     /**
      * Interface to interact with domain values.
+     * Look at the array of chars and operate them like domain's data.
      * @see Domain_Value.
      *
      * ```cpp
@@ -482,8 +531,13 @@ namespace toad_db {
      **/
     struct Domain_View {
         Domain *domain;
-        Domain_Value *data;
-        size_t offset = 0;
+        char *data;
+
+        Domain_View(Domain *domain, Domain_Value *domain_value):
+            domain(domain), data(domain_value->data()) {}
+
+        Domain_View(Domain *domain, char *data):
+            domain(domain), data(data) { }
 
         /**
          * Try to unwrap wrong variant.
@@ -536,7 +590,7 @@ namespace toad_db {
             if (Domain::type2variant<Type>() != domain->variant)
                 throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
 
-            return *(Type*)(data->data() + offset);
+            return *(Type*)data;
         }
 
         /**
@@ -550,7 +604,7 @@ namespace toad_db {
             if (Domain::type2variant<Type>() != domain->variant)
                 throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
 
-            return *(Type*)(data->data() + offset);
+            return *(Type*)data;
         }
 
         /**
@@ -564,7 +618,7 @@ namespace toad_db {
             if (Domain::type2variant<Type>() != domain->variant)
                 throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
 
-            *(Type*)(data->data() + offset) = value;
+            *(Type*)data = value;
         }
 
         /**
@@ -573,31 +627,19 @@ namespace toad_db {
         Domain_View operator[](const std::string &name) {
             if (!is_complex(domain->variant)) throw Variant_Has_Not_Fields(domain->variant);
 
-            size_t _offset = 0;
+            size_t offset = 0;
             size_t idx = 0;
             for (auto &field: domain->complex_fields) {
                 Domain *field_domain = &(*domain->domains)[field.domain_idx];
-                _offset += field_domain->size_of();
+                offset += field_domain->size_of();
 
                 if (field.field_name == name) {
                     if (domain->variant == Domain::Variant::Add) {
-
-                        const size_t fields_size = domain->complex_fields.size();
-
-                        if (fields_size <= 0xFF) {
-                            *(types::U8*)(data->data() + offset) = (types::U8)idx;
-                            _offset += sizeof(types::U8);
-                        } else if (fields_size <= 0xFFFF) {
-                            *(types::U16*)(data->data() + offset) = (types::U16)idx;
-                            _offset += sizeof(types::U16);
-                        }
+                        const size_t fields_count = domain->complex_fields.size();
+                        Domain::set_counter(data, fields_count, idx);
                     }
 
-                    return Domain_View {
-                        field_domain,
-                        data,
-                        _offset,
-                    };
+                    return Domain_View { field_domain, data + offset, };
                 }
                 idx++;
             }
@@ -605,6 +647,59 @@ namespace toad_db {
             throw Domain_Has_Not_Such_Field(name);
         }
 
+        /**
+         * Try to get field with idx bigger or equal to size of fields vector.
+         **/
+        class Field_Idx_Out_Of_Range: public Toad_Exception {
+            public:
+                Field_Idx_Out_Of_Range(size_t idx, size_t size):
+                    Toad_Exception(std::string("Field idx out of range.") 
+                                        + " idx: " + std::to_string(idx)
+                                        + " size: " + std::to_string(size)) { } 
+        };
+        /**
+         * Try to get array value at idx bigger or equal to len of an array.
+         **/
+        class Array_Idx_Out_Of_Range: public Toad_Exception {
+            public:
+                Array_Idx_Out_Of_Range(size_t idx, size_t len):
+                    Toad_Exception(std::string("Array idx out of range.") 
+                                        + " idx: " + std::to_string(idx)
+                                        + " len: " + std::to_string(len)) { } 
+        };
+
+        Domain_View operator[](size_t idx) noexcept(false) {
+            if (!is_complex(domain->variant) && !is_array(domain->variant))
+                throw Variant_Has_Not_Fields(domain->variant);
+
+            if (is_complex(domain->variant)) {
+                if (idx >= domain->complex_fields.size())
+                    throw Field_Idx_Out_Of_Range(idx, domain->complex_fields.size());
+
+                return operator[](domain->complex_fields[idx].field_name);
+            } 
+
+            if (is_array(domain->variant)) {
+                size_t len = Domain::get_counter(data, domain->array.capacity);
+                if (idx >= len)
+                    throw Array_Idx_Out_Of_Range(idx, len);
+
+                Domain* elem_domain = &(*domain->domains)[domain->array.idx];
+                size_t elem_size = elem_domain->size_of();
+
+                return Domain_View {
+                    elem_domain,
+                    data + Domain::counter_size_of(domain->array.capacity)
+                         + elem_size * idx
+                };
+            }
+
+            throw Domain::Invalid_Variant_Value(domain->variant);
+        }
+
+        /**
+         * Get variant of Add Domain.
+         **/
         size_t get_variant(void) {
             if (domain->variant != Domain::Variant::Add)
                 throw Access_Add_Variant_Not_From_Add_Domen(domain->variant);
@@ -613,9 +708,9 @@ namespace toad_db {
             size_t variant = 0;
 
             if (size <= 0xFF) {
-                variant = *(types::U8*)(data->data() + offset);
+                variant = *(types::U8*)data;
             } else if (size <= 0xFFFF) {
-                variant = *(types::U16*)(data->data() + offset);
+                variant = *(types::U16*)data;
             }
 
             return variant;
@@ -666,7 +761,17 @@ namespace toad_db {
 
             }
             if (is_array(view.domain->variant)) {
-                return view.domain->domain_name;
+                size_t len = Domain::get_counter(view.data, view.domain->array.capacity); 
+
+                std::string ret = view.domain->domain_name
+                    + " " + std::to_string(view.domain->array.capacity)
+                    + ":" + std::to_string(len) + " [ ";
+
+                for (types::U64 i = 0; i < len; i++) {
+                    ret += to_string(view[i]) + (i != len -1 ? ", " : "");
+                }
+
+                return ret + " ]";
             }
 
             if (view.domain->variant == Domain::Variant::Add) {
