@@ -1,8 +1,13 @@
 #ifndef __COMMON_GUARS_H__
 #define __COMMON_GUARS_H__
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <memory>
+#include <span>
 #include <stdexcept>
+#include <vector>
 
 
 namespace toad_db {
@@ -21,6 +26,9 @@ namespace toad_db {
         using I64 = std::int64_t;
         using F32 = float;
         using F64 = double;
+        using Bool = bool;
+
+        using Data_Slice = std::span<char, std::dynamic_extent>;
     }
 
 	/**
@@ -32,128 +40,672 @@ namespace toad_db {
                 std::runtime_error("Toad: `" + reason + "`.") { }
     };
 
-
-	/**
-     * Dynamic typed domen.
-     *
-     * Domens can be different variants, actual data of domen allocated on
-     * the heap.
-     *
-     * Domen owning value, which means it's free value in destructor.
-     **/
-    struct Domen {
+    struct Domain {
         /**
-         * # Variant of contained domen .
+         * Name of the domain, it's way to identify domen.
+         **/
+        using Domain_Idx = std::size_t;
+
+        /**
+         * Collection of all domens;
+         **/
+        struct Domains {
+            std::vector<Domain> data;
+
+            Domains(const std::vector<Domain>& data): data{data} {
+                for (auto &domain : this->data) {
+                    domain.domains = this;
+                }
+            }
+
+            /**
+             * Throws if try to get domain of invalid (unregisered name).
+             **/
+            class Invalid_Domain_Name: public Toad_Exception {
+                public:
+                    Invalid_Domain_Name(const std::string& name):
+                        Toad_Exception("Failed to get domain with name `" + name + "`") { } 
+            };
+            class Domain_Idx_Out_Of_Range: public Toad_Exception {
+                public:
+                    Domain_Idx_Out_Of_Range(Domain_Idx idx, size_t size):
+                        Toad_Exception("Domain idx out of range. (idx = " +
+                                        std::to_string(idx) + ", size = " +
+                                        std::to_string(size) + ")") {}
+            };
+
+            /**
+             * Get domain idx by it's name.
+             *
+             * @param name - name of the domain to get.
+             * @return idx of the domain.
+             * 
+             * @throws Invalid_Domen_Name if there is no such domain
+             **/
+            Domain_Idx by_name(const std::string& name) const noexcept(false) {
+                auto it = std::find_if(data.begin(), data.end(), 
+                            [=](const auto &domain) { 
+                                return domain.domain_name == name;  
+                            });
+
+                if (it == data.end()) throw Invalid_Domain_Name(name);
+
+                return it - data.begin();
+            }
+
+            Domain_Idx operator[](const std::string& name) const noexcept(false) {
+                return by_name(name);
+            }
+
+            Domain& operator[](Domain_Idx idx) noexcept(false) {
+                if (idx > data.size()) throw Domain_Idx_Out_Of_Range(idx, data.size());
+                return data[idx];
+            }
+
+            const Domain& operator[](Domain_Idx idx) const noexcept(false) {
+                if (idx > data.size()) throw Domain_Idx_Out_Of_Range(idx, data.size());
+                return data[idx];
+            }
+            Domain& operator()(const std::string& name) noexcept(false) {
+                return data[by_name(name)];
+            }
+
+            const Domain& operator()(const std::string& name) const noexcept(false) {
+                return data[by_name(name)];
+            }
+
+            void add(const Domain& domain) {
+                Domain cp_domain = domain;
+                cp_domain.domains = this;
+                data.push_back(cp_domain);
+            }
+        } *domains;
+
+        /**
+         * Name of the domain.
+         **/
+        std::string domain_name;
+
+        /**
+         * # Variant of contained domain .
          *
-         * - Just basic types: U8, U16, U32, U64, I8, I16, I32, I64, F32, F64.
+         * - Just basic domains: U8, U16, U32, U64, I8, I16, I32, I64, F32, F64.
          * 
-         * - Alias: variant of alias domen used for domens like ```domen Day = U8;```.
+         * - Alias: variant of alias domain used for domains like ```domain Day = U8;```.
          *   value of alias contains variant and data.
          *
-         * - Array: represent array of values of specific domen.
+         * - Array: represent array of values of specific domain.
          *
-         * - Algebraic_Domen: domen representing sum and or multiplication of other domains.
+         * - Algebraic_Domen: domain representing sum and or multiplication of other domains.
          * 	 Like in __Haskell__.
          **/
         enum class Variant: char { 
-            U8=0, U16, U32, U64, I8, I16, I32, I64, F32, F64,
-            Alias, Array,  Algebraic_Domen,
+            U8=0, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool,
+            Array, Add, Mul
         } variant; 
 
-        /**
-         * Data of the domen.
-         **/
-        void* value;
-
-        class Domen_Unwrap_Exception: public Toad_Exception {
-            public: Domen_Unwrap_Exception(Variant expect, Variant real);
-        };
-
-        struct Alias_Data {
-
-        };
-
-        size_t size_of() const noexcept {
-            using namespace types;
+        friend std::string to_string(Variant variant) {
             switch (variant) {
-            case Variant::U8: return sizeof(U8);
-            case Variant::U16: return sizeof(U16);
-            case Variant::U32: return sizeof(U32);
-            case Variant::U64: return sizeof(U64);
-            case Variant::I8: return sizeof(I8);
-            case Variant::I16: return sizeof(I16);
-            case Variant::I32: return sizeof(I32);
-            case Variant::I64: return sizeof(I64);
-            case Variant::F32: return sizeof(F32);
-            case Variant::F64: return sizeof(F64);
-            case Variant::Alias: {
-            } break;
-            case Variant::Array: {
-            } break;
-            case Variant::Algebraic_Domen: {
-            } break;
+            case Domain::Variant::U8:    return "U8";
+            case Domain::Variant::U16:   return "U16";
+            case Domain::Variant::U32:   return "U32";
+            case Domain::Variant::U64:   return "U64";
+            case Domain::Variant::I8:    return "I8";
+            case Domain::Variant::I16:   return "I16";
+            case Domain::Variant::I32:   return "I32";
+            case Domain::Variant::I64:   return "I64";
+            case Domain::Variant::F32:   return "F32";
+            case Domain::Variant::F64:   return "F64";
+            case Domain::Variant::Bool:  return "Bool";
+            case Domain::Variant::Array: return "Array";
+            case Domain::Variant::Add:   return "Add";
+            case Domain::Variant::Mul:   return "Mul";
+            default:
+                throw Domain::Invalid_Variant_Value(variant);
+            }
+        }
+        friend std::ostream& operator<<(std::ostream& os, Domain::Variant variant);
+
+        /**
+         * Get basic variant for type.
+         **/
+        template<typename Type> static constexpr Variant type2variant();
+
+        template<> constexpr Variant type2variant<types::U8>() { return Variant::U8; }
+        template<> constexpr Variant type2variant<types::U16>() { return Variant::U16; }
+        template<> constexpr Variant type2variant<types::U32>() { return Variant::U32; }
+        template<> constexpr Variant type2variant<types::U64>() { return Variant::U64; }
+
+        template<> constexpr Variant type2variant<types::I8>() { return Variant::I8; }
+        template<> constexpr Variant type2variant<types::I16>() { return Variant::I16; }
+        template<> constexpr Variant type2variant<types::I32>() { return Variant::I32; }
+        template<> constexpr Variant type2variant<types::I64>() { return Variant::I64; }
+
+        template<> constexpr Variant type2variant<types::F32>() { return Variant::F32; }
+        template<> constexpr Variant type2variant<types::F64>() { return Variant::F64; }
+        template<> constexpr Variant type2variant<types::Bool>() { return Variant::Bool; }
+
+        friend constexpr bool is_basic(Variant variant) {
+            if ((char)variant < (char)Variant::Array) return true;
+            return false;
+        }
+
+        friend constexpr bool is_array(Variant variant) {
+            if ((char)variant == (char)Variant::Array) return true;
+            return false;
+        }
+
+        friend constexpr bool is_complex(Variant variant) {
+            if ((char)variant > (char)Variant::Array) return true;
+            return false;
+        }
+
+
+        /**
+         * Field of the complex domain (Mul or Add).
+         **/
+        struct Field {
+            std::string field_name;
+            bool has_type;
+            Domain_Idx domain_idx;
+
+            Field(std::string field_name, Domain_Idx domain_idx):
+                field_name(field_name), has_type(true), domain_idx(domain_idx) { }
+
+            Field(std::string field_name):
+                field_name(field_name), has_type(false), domain_idx(0) { }
+
+        };
+
+        /**
+         * Data for Array variant.
+         **/
+        struct Array_Data {
+            types::U64 len;
+            Domain_Idx idx;
+        };
+
+        /**
+         * Data of complex or array domains representing additional value
+         * of the domain like len or fields.
+         **/
+        union {
+            Array_Data array;                   // for Variant::Array.
+            std::vector<Field> complex_fields;  // For Variant::Mul or Variant::Add.
+        };
+
+
+        /**
+         * Subset of Domain's variants that represents basic domains.
+         **/
+        enum class Basic_Variants: char {
+            U8=0, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool
+        };
+
+        /**
+         * Subset of Domain's variants that represents Complex domain (Add or Mul).
+         **/
+        enum class Complex_Variant: char {
+            Add=0, Mul
+        };
+
+        /**
+         * Subset of Domain's variants that represents arrays.
+         **/
+        enum class Array_Variant: char {
+            Array=0
+        };
+
+        /**
+         * Construct basic domain or alias to a basic domain.
+         * 
+         * @param name - name of the domain.
+         * @param basic_variant - variant of the domain.
+         **/
+        Domain(const std::string &name, Basic_Variants basic_variant) {
+            domain_name = name;
+            variant     = Variant((char)basic_variant);
+        }
+
+        /**
+         * Construct complex domain.
+         *
+         * @param name - name of the domain.
+         * @param complex_variant - variants of complex domain (Add or Mul).
+         * @param field - vector of the fields.
+         **/
+        Domain(const std::string &name, Complex_Variant complex_variant,
+                                        const std::vector<Field>& fields) {
+            domain_name    = name;
+            variant        = Variant((char)Variant::Add + (char)complex_variant);
+
+            std::construct_at(&complex_fields, fields); 
+        }
+
+        /**
+         * Construct complex domain.
+         *
+         * @param name - name of the domain.
+         * @param complex_variant - variants of complex domain (Add or Mul).
+         * @param field - vector of the fields.
+         **/
+        Domain(const std::string &name, Array_Variant array_variant,
+                                        Domain_Idx elem_idx, size_t len) {
+            domain_name = name;
+            variant     = Variant((char)Variant::Array + (char)array_variant);
+            array.len   = len;
+            array.idx   = elem_idx;
+        }
+
+        Domain(const Domain& domain):
+            domains(domain.domains),
+            domain_name(domain.domain_name),
+            variant(domain.variant)
+        {
+            if (is_complex(variant)) {
+                std::construct_at(&complex_fields, domain.complex_fields); 
+            } else {
+                array = domain.array;
             }
         }
 
-        Domen(const Domen& domen) {
-            variant = domen.variant;
+
+        /**
+         * Init domains with default
+         **/
+        static Domains default_domains(void) {
+            Domains domains {{
+                /*****************************
+                 *      NUMERIC DOMENS       *
+                 *****************************/
+                Domain { "U8",  Basic_Variants::U8  },
+                Domain { "U16", Basic_Variants::U16 },
+                Domain { "U32", Basic_Variants::U32 },
+                Domain { "U64", Basic_Variants::U64 },
+                Domain { "Key", Basic_Variants::U64 },
+
+                Domain { "I8",  Basic_Variants::I8  },
+                Domain { "I16", Basic_Variants::I16 },
+                Domain { "I32", Basic_Variants::I32 },
+                Domain { "I64", Basic_Variants::I64 },
+
+                Domain { "F32", Basic_Variants::F32 },
+                Domain { "F64", Basic_Variants::F64 },
+
+                Domain { "Bool", Basic_Variants::Bool },
+
+                /*******************************
+                 *        Time and Date        *
+                 *******************************/
+
+                Domain { "Month", Complex_Variant::Add, {
+                    {"jan"}, {"feb"}, {"mar"}, {"apr"}, 
+                    {"may"}, {"jul"}, {"jun"}, {"aug"}, 
+                    {"sep"}, {"oct"}, {"nov"}, {"dec"}}},
+
+                Domain { "Day",        Basic_Variants::U8  },
+                Domain { "Year",       Basic_Variants::U16 },
+                Domain { "Seconds",    Basic_Variants::U32 },
+                Domain { "Time_Stamp", Basic_Variants::U64 },
+            }};
+
+
+            domains.add({ "Date", Complex_Variant::Mul, {
+                        { "day", domains["Day"]},
+                        { "month", domains["Month"]},
+                        { "year", domains["Year"]},
+                        { "time", domains["Seconds"]}}});
+
+            return domains;
         }
 
 
-        types::U8 get_u8() const noexcept(false) {
-            if (variant != Variant::U8) throw Domen_Unwrap_Exception(Variant::U8, variant);
-            return *(types::U8*)value;
+        class Invalid_Variant_Value: public Toad_Exception {
+            public:
+                Invalid_Variant_Value(Variant variant):
+                    Toad_Exception("Somehow invalid value of the Domains's variant." 
+                                    + to_string(variant)) { }
+        };
+
+        /**
+         * Returns size of the types value.
+         **/
+        size_t size_of(void) const noexcept(false) {
+            using namespace types;
+
+            switch (variant) {
+
+            case Variant::U8:   return sizeof(U8);
+            case Variant::U16:  return sizeof(U16);
+            case Variant::U32:  return sizeof(U32);
+            case Variant::U64:  return sizeof(U64);
+            case Variant::I8:   return sizeof(I8);
+            case Variant::I16:  return sizeof(I16);
+            case Variant::I32:  return sizeof(I32);
+            case Variant::I64:  return sizeof(I64);
+            case Variant::F32:  return sizeof(F32);
+            case Variant::F64:  return sizeof(F64);
+            case Variant::Bool: return sizeof(Bool); 
+
+            case Variant::Array: {
+                size_t size_of_elem = (*domains)[array.idx].size_of();
+                return size_of_elem * array.len;
+            }
+
+            case Variant::Add: {
+                size_t size = 0;
+                for (auto &field : complex_fields) {
+                    if (!field.has_type) continue;
+
+                    size_t curr = (*domains)[field.domain_idx].size_of();
+                    size = curr > size ? curr : size;
+                }
+                const size_t fields_size = complex_fields.size();
+
+                if (fields_size <= 0xFF) {
+                    size += sizeof(U8);
+                } else if (fields_size <= 0xFFFF) {
+                    size += sizeof(U16);
+                }
+
+                return size;
+            }
+
+            case Variant::Mul: {
+                size_t size = 0; 
+
+                for (auto field : complex_fields) {
+                    size += (*domains)[field.domain_idx].size_of();
+                }
+
+                return size;
+            }
+
+            default:
+                throw Domain::Invalid_Variant_Value(variant);
+            }
         }
 
-        types::U16 get_u16() const noexcept(false) {
-            if (variant != Variant::U16) throw Domen_Unwrap_Exception(Variant::U16, variant);
-            return *(types::U16*)value;
+        ~Domain() {
         }
-
-        types::U32 get_u32() const noexcept(false) {
-            if (variant != Variant::U32) throw Domen_Unwrap_Exception(Variant::U32, variant);
-            return *(types::U32 *)value;
-        }
-
-        types::U64  get_u64() const noexcept(false) {
-            if (variant != Variant::U64) throw Domen_Unwrap_Exception(Variant::U64, variant);
-            return *(types::U64*)value;
-        }
-
-        types::I8 get_i8() const noexcept(false) {
-            if (variant != Variant::I8) throw Domen_Unwrap_Exception(Variant::I8, variant);
-            return *(types::I8*)value;
-        }
-
-        types::I16 get_i16() const noexcept(false) {
-            if (variant != Variant::I16) throw Domen_Unwrap_Exception(Variant::I16, variant);
-            return *(types::I16*)value;
-        }
-
-        types::I32 get_i32() const noexcept(false) {
-            if (variant != Variant::I32) throw Domen_Unwrap_Exception(Variant::I32, variant);
-            return *(types::I32 *)value;
-        }
-
-        types::I64  get_i64() const noexcept(false) {
-            if (variant != Variant::I64) throw Domen_Unwrap_Exception(Variant::I64, variant);
-            return *(types::I64*)value;
-        }
-
-        types::F32 get_f32() const noexcept(false) {
-            if (variant != Variant::F32) throw Domen_Unwrap_Exception(Variant::F32, variant);
-            return *(types::F32 *)value;
-        }
-
-        types::F64  get_f64() const noexcept(false) {
-            if (variant != Variant::F64) throw Domen_Unwrap_Exception(Variant::F64, variant);
-            return *(types::F64*)value;
-        }
-
     };
 
-    class Table {
 
+
+    /**
+     * Contains value of specific domain.
+     **/
+    struct Domain_Value {
+        Domain_Value(Domain* domain) {
+            size = domain->size_of();
+
+            if (size > 8) {
+                big_data = (char*)std::malloc(size);
+            }
+        }
+
+        char* data() {
+            if (size > 8) {
+                return big_data;
+            } else {
+                return small_data.data();
+            }
+        }
+        private:
+        size_t size;
+        union {
+            std::array<char, 8> small_data { 0 };
+            char* big_data;
+        };
+    };
+
+
+    /**
+     * Interface to interact with domain values.
+     * @see Domain_Value.
+     *
+     * ```cpp
+     * auto domains = toad_db::Domain::default_domains();
+     * 
+     * Domain_Value value;
+     *
+     * Domain_View view  { &domains("I32"), &value };
+     * view.set_basic<I32>(10);
+     *
+     * std::cout << view.unwrap_basic<I32>(); // return 10;
+     * view.unwrap_basic<I32>() = 20;
+     * 
+     * std::cout << view.unwrap_basic<I32>(); // return 20;
+     *
+     * view.unwrap_basic<U32>(); // throws Unwrap_Invalid_Variant;
+     * ```
+     **/
+    struct Domain_View {
+        Domain *domain;
+        Domain_Value *data;
+        size_t offset = 0;
+
+        /**
+         * Try to unwrap wrong variant.
+         **/
+        class Unwrap_Invalid_Variant: public Toad_Exception {
+            public:
+                Unwrap_Invalid_Variant(Domain::Variant actual, Domain::Variant expected):
+                    Toad_Exception(std::string("Unwrap invalid exception:") 
+                                        + " given variant " + to_string(actual)
+                                        + " excpected " + to_string(expected)) { }
+        };
+
+        /**
+         * Throws when try to use non complex domen like complex.
+         **/
+        class Variant_Has_Not_Fields: public Toad_Exception {
+            public:
+                Variant_Has_Not_Fields(Domain::Variant variant):
+                    Toad_Exception("Try to get field of non complex domain variant. ("
+                                        + to_string(variant) + ")") { }
+        };
+
+        /**
+         * When try to get wrong field with wrong name.
+         **/
+        class Domain_Has_Not_Such_Field: public Toad_Exception {
+            public:
+                Domain_Has_Not_Such_Field(const std::string name):
+                    Toad_Exception("Domain has not such field: `" + name + "`") { } 
+        };
+
+        /**
+         * Try to get variant not from Add variant.
+         **/
+        class Access_Add_Variant_Not_From_Add_Domen: public Toad_Exception {
+            public:
+                Access_Add_Variant_Not_From_Add_Domen(Domain::Variant variant):
+                    Toad_Exception("Try to get variant not from Add variant. ("
+                                        + to_string(variant) + ")") {} 
+        };
+
+        /**
+         * Unwrap and return casted reference to the value.
+         *
+         * @return value;
+         * @throws `Unwrap_Invalid_Variant` if given incorect type or value is not basic type.
+         **/
+        template<typename Type>
+        Type& unwrap_basic() noexcept(false) {
+            if (Domain::type2variant<Type>() != domain->variant)
+                throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
+
+            return *(Type*)(data->data() + offset);
+        }
+
+        /**
+         * Unwrap and return casted reference to the value.
+         *
+         * @return value;
+         * @throws `Unwrap_Invalid_Variant` if given incorect type or value is not basic type.
+         **/
+        template<typename Type>
+        const Type& unwrap_basic() const noexcept(false) {
+            if (Domain::type2variant<Type>() != domain->variant)
+                throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
+
+            return *(Type*)(data->data() + offset);
+        }
+
+        /**
+         * Unwrap and set new value to the domen value.
+         *
+         * @param value - new value.
+         * @throws `Unwrap_Invalid_Variant` if given incorect type or value is not basic type.
+         **/
+        template<typename Type>
+        void set_basic(Type value) noexcept(false) {
+            if (Domain::type2variant<Type>() != domain->variant)
+                throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
+
+            *(Type*)(data->data() + offset) = value;
+        }
+
+        /**
+         * Get Domain_View of the field by field name.
+         **/
+        Domain_View operator[](const std::string &name) {
+            if (!is_complex(domain->variant)) throw Variant_Has_Not_Fields(domain->variant);
+
+            size_t _offset = 0;
+            size_t idx = 0;
+            for (auto &field: domain->complex_fields) {
+                Domain *field_domain = &(*domain->domains)[field.domain_idx];
+                _offset += field_domain->size_of();
+
+                if (field.field_name == name) {
+                    if (domain->variant == Domain::Variant::Add) {
+
+                        const size_t fields_size = domain->complex_fields.size();
+
+                        if (fields_size <= 0xFF) {
+                            *(types::U8*)(data->data() + offset) = (types::U8)idx;
+                            _offset += sizeof(types::U8);
+                        } else if (fields_size <= 0xFFFF) {
+                            *(types::U16*)(data->data() + offset) = (types::U16)idx;
+                            _offset += sizeof(types::U16);
+                        }
+                    }
+
+                    return Domain_View {
+                        field_domain,
+                        data,
+                        _offset,
+                    };
+                }
+                idx++;
+            }
+
+            throw Domain_Has_Not_Such_Field(name);
+        }
+
+        size_t get_variant(void) {
+            if (domain->variant != Domain::Variant::Add)
+                throw Access_Add_Variant_Not_From_Add_Domen(domain->variant);
+
+            size_t size = domain->size_of();
+            size_t variant = 0;
+
+            if (size <= 0xFF) {
+                variant = *(types::U8*)(data->data() + offset);
+            } else if (size <= 0xFFFF) {
+                variant = *(types::U16*)(data->data() + offset);
+            }
+
+            return variant;
+        }
+
+        friend std::string to_string(Domain_View view) {
+            if (is_basic(view.domain->variant)) {
+
+                switch (view.domain->variant) {
+                case Domain::Variant::U8:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::U8>()) + ")"; 
+                case Domain::Variant::U16:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::U16>()) + ")"; 
+                case Domain::Variant::U32:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::U32>()) + ")"; 
+                case Domain::Variant::U64:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::U64>()) + ")"; 
+                case Domain::Variant::I8:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::I8>()) + ")"; 
+                case Domain::Variant::I16:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::I16>()) + ")"; 
+                case Domain::Variant::I32:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::I32>()) + ")"; 
+                case Domain::Variant::I64:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::I64>()) + ")"; 
+                case Domain::Variant::F32:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::F32>()) + ")"; 
+                case Domain::Variant::F64:
+                    return view.domain->domain_name
+                            + "(" + std::to_string(view.unwrap_basic<types::F64>()) + ")"; 
+                case Domain::Variant::Bool:
+                    return view.domain->domain_name
+                            + "("
+                            + std::string(view.unwrap_basic<types::Bool>() ? "true" : "false")
+                            + ")"; 
+                default:
+                    throw Toad_Exception("Unreachable!");
+                }
+
+            }
+            if (is_array(view.domain->variant)) {
+                return view.domain->domain_name;
+            }
+
+            if (view.domain->variant == Domain::Variant::Add) {
+                size_t variant = view.get_variant();
+                Domain::Field field = view.domain->complex_fields[variant];
+
+                return view.domain->domain_name + "::" + field.field_name
+                        + (field.has_type ? "(" + to_string(view[field.field_name]) + ")" : "");
+            }
+
+            if (view.domain->variant == Domain::Variant::Add) {
+                size_t variant = view.get_variant();
+                Domain::Field field = view.domain->complex_fields[variant];
+
+                if (field.has_type) {
+                    return field.field_name + "(" + to_string(view[field.field_name]) + ")";
+                } else {
+                    return field.field_name;
+                }
+            }
+
+            if (view.domain->variant == Domain::Variant::Mul) {
+                std::string ret = view.domain->domain_name + "{ ";
+
+                for (auto &field: view.domain->complex_fields) {
+                    ret += field.field_name + ": " + to_string(view[field.field_name]) + ", ";
+                }
+
+                return ret + "}";
+            }
+
+            throw Domain::Invalid_Variant_Value(view.domain->variant);
+        }
+    };
+
+
+    class Table {
+        std::vector<Domain> columns_domains;
+        std::vector<Domain_Value> data;
     };
 }
 
