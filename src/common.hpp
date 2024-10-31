@@ -11,7 +11,6 @@
 
 
 namespace toad_db {
-
     /**
      * Using for basic types for better connection with language.
      **/
@@ -343,10 +342,10 @@ namespace toad_db {
          * @param field - vector of the fields.
          **/
         Domain(const std::string &name, Array_Variant array_variant,
-                                        Domain_Idx elem_idx, size_t len) {
+                                        Domain_Idx elem_idx, size_t capacity) {
             domain_name = name;
             variant     = Variant((char)Variant::Array + (char)array_variant);
-            array.capacity   = len;
+            array.capacity   = capacity;
             array.idx   = elem_idx;
         }
 
@@ -553,9 +552,9 @@ namespace toad_db {
         /**
          * Throws when try to use non complex domen like complex.
          **/
-        class Variant_Has_Not_Fields: public Toad_Exception {
+        class Not_Complex_Variant: public Toad_Exception {
             public:
-                Variant_Has_Not_Fields(Domain::Variant variant):
+                Not_Complex_Variant(Domain::Variant variant):
                     Toad_Exception("Try to get field of non complex domain variant. ("
                                         + to_string(variant) + ")") { }
         };
@@ -570,12 +569,12 @@ namespace toad_db {
         };
 
         /**
-         * Try to get variant not from Add variant.
+         * Try to call add variant function on not add variant domain view.
          **/
-        class Access_Add_Variant_Not_From_Add_Domen: public Toad_Exception {
+        class Not_Add_Variant: public Toad_Exception {
             public:
-                Access_Add_Variant_Not_From_Add_Domen(Domain::Variant variant):
-                    Toad_Exception("Try to get variant not from Add variant. ("
+                Not_Add_Variant(Domain::Variant variant):
+                    Toad_Exception("Try to call add variant function on not add variant domain view. ("
                                         + to_string(variant) + ")") {} 
         };
 
@@ -625,7 +624,7 @@ namespace toad_db {
          * Get Domain_View of the field by field name.
          **/
         Domain_View operator[](const std::string &name) {
-            if (!is_complex(domain->variant)) throw Variant_Has_Not_Fields(domain->variant);
+            if (!is_complex(domain->variant)) throw Not_Complex_Variant(domain->variant);
 
             size_t offset = 0;
             size_t idx = 0;
@@ -668,9 +667,37 @@ namespace toad_db {
                                         + " len: " + std::to_string(len)) { } 
         };
 
+        /**
+         * Array length out of bounds.
+         **/
+        class Array_Length_Out_Of_Bounds: public Toad_Exception {
+            public:
+                Array_Length_Out_Of_Bounds(size_t len, size_t cap):
+                	Toad_Exception(std::string("Array length out of bounds.")
+                                        + " len: " + std::to_string(len)
+                                        + " cap: " + std::to_string(cap)) { } 
+        };
+
+        /**
+         * Try to call array function from not array domain view.
+         **/
+        class Not_Array_Variant: public Toad_Exception {
+            public:
+                Not_Array_Variant(Domain::Variant variant):
+                    Toad_Exception("Try to call array function from not array domain view. ("
+                                                    + to_string(variant) + ")") { }
+        };
+
+        class Pop_From_Empty_Array: public Toad_Exception {
+            public:
+                Pop_From_Empty_Array():
+                	Toad_Exception("Try to pop on empty array.") { } 
+        };
+
+
         Domain_View operator[](size_t idx) noexcept(false) {
             if (!is_complex(domain->variant) && !is_array(domain->variant))
-                throw Variant_Has_Not_Fields(domain->variant);
+                throw Not_Complex_Variant(domain->variant);
 
             if (is_complex(domain->variant)) {
                 if (idx >= domain->complex_fields.size())
@@ -702,7 +729,7 @@ namespace toad_db {
          **/
         size_t get_variant(void) {
             if (domain->variant != Domain::Variant::Add)
-                throw Access_Add_Variant_Not_From_Add_Domen(domain->variant);
+                throw Not_Add_Variant(domain->variant);
 
             size_t size = domain->size_of();
             size_t variant = 0;
@@ -715,6 +742,71 @@ namespace toad_db {
 
             return variant;
         }
+
+        /**
+         * Get length of the array.
+         *
+         * @return length of the array.
+         * @throws Access_Length_Not_From_Array_Domain if domain is not an array variant.
+         **/
+        constexpr size_t get_length(void) const noexcept(false) {
+            if (!is_array(domain->variant))
+                throw Not_Array_Variant(domain->variant);
+
+            return Domain::get_counter(data, domain->array.capacity); 
+        }
+
+        /**
+         * Set new length of the array.
+         * Value must be lesser or equal to capacity of the array.
+         *
+         * @param length - new length of the array.
+         * @throws Array_Length_Out_Of_Bounds if length greater than capacity.
+         * @throws Not_Array_Variant if domain is not an array variant.
+         **/
+        constexpr void set_length(size_t length) noexcept(false) {
+            if (!is_array(domain->variant))
+                throw Not_Array_Variant(domain->variant);
+
+            if (length > domain->array.capacity)
+                throw Array_Length_Out_Of_Bounds(length, domain->array.capacity);
+
+            Domain::set_counter(data, domain->array.capacity, length); 
+        }
+
+        /**
+         * Push basic element to the array.
+         *
+         * @param value - value to push.
+         * @throws Unwrap_Invalid_Variant if type not suited to array element variant.
+         * @throws like @see set_length & @see get_length
+         **/
+        template<typename Type>
+        void array_push_basic(Type value) noexcept(false) {
+            if (!is_array(domain->variant))
+                throw Not_Array_Variant(domain->variant);
+
+            if (Domain::type2variant<Type>() != (*domain->domains)[domain->array.idx].variant)
+                throw Unwrap_Invalid_Variant(Domain::type2variant<Type>(),  domain->variant);
+
+            set_length(get_length()+1); // will throw if overflow.
+
+            ((Type*)data)[get_length()] = value;
+        }
+
+        /**
+         * Array pop.
+         **/
+        void array_pop(void) noexcept(false) {
+            if (!is_array(domain->variant))
+                throw Not_Array_Variant(domain->variant);
+
+            if (get_length() == 0)
+                throw Pop_From_Empty_Array();
+
+            set_length(get_length()-1);
+        }
+
 
         friend std::string to_string(Domain_View view) {
             if (is_basic(view.domain->variant)) {
@@ -761,7 +853,7 @@ namespace toad_db {
 
             }
             if (is_array(view.domain->variant)) {
-                size_t len = Domain::get_counter(view.data, view.domain->array.capacity); 
+                size_t len = view.get_length(); 
 
                 std::string ret = view.domain->domain_name
                     + " " + std::to_string(view.domain->array.capacity)
@@ -806,7 +898,6 @@ namespace toad_db {
             throw Domain::Invalid_Variant_Value(view.domain->variant);
         }
     };
-
 
     class Table {
         std::vector<Domain> columns_domains;
