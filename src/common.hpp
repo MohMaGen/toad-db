@@ -2,8 +2,10 @@
 #define __COMMON_GUARS_H__
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -723,6 +725,31 @@ namespace toad_db {
 
             throw Domain_Has_Not_Such_Field(name);
         }
+        /**
+         * Get Domain_View of the field by field name.
+         **/
+        const Domain_View operator[](const std::string &name) const {
+            if (!Domain::is_complex(domain->variant)) throw Not_Complex_Variant(domain->variant);
+
+            size_t offset = 0;
+            size_t idx = 0;
+            for (auto &field: domain->complex_fields) {
+                Domain *field_domain = &(*domain->domains)[field.domain_idx];
+
+                if (field.field_name == name) {
+                    if (domain->variant == Domain::Variant::Add) {
+                        const size_t fields_count = domain->complex_fields.size();
+                        Domain::set_counter(data, fields_count, idx);
+                        offset += Domain::counter_size_of(fields_count); 
+                    }
+                    return Domain_View { field_domain, data + offset, };
+                }
+                offset += field_domain->size_of();
+                idx++;
+            }
+
+            throw Domain_Has_Not_Such_Field(name);
+        }
 
         /**
          * Try to get field with idx bigger or equal to size of fields vector.
@@ -774,6 +801,35 @@ namespace toad_db {
 
 
         Domain_View operator[](size_t idx) noexcept(false) {
+            if (!Domain::is_complex(domain->variant) && !Domain::is_array(domain->variant))
+                throw Not_Complex_Variant(domain->variant);
+
+            if (Domain::is_complex(domain->variant)) {
+                if (idx >= domain->complex_fields.size())
+                    throw Field_Idx_Out_Of_Range(idx, domain->complex_fields.size());
+
+                return operator[](domain->complex_fields[idx].field_name);
+            } 
+
+            if (Domain::is_array(domain->variant)) {
+                size_t len = Domain::get_counter(data, domain->array.capacity);
+                if (idx >= len)
+                    throw Array_Idx_Out_Of_Range(idx, len);
+
+                Domain* elem_domain = &(*domain->domains)[domain->array.idx];
+                size_t elem_size = elem_domain->size_of();
+
+                return Domain_View {
+                    elem_domain,
+                    data + Domain::counter_size_of(domain->array.capacity)
+                         + elem_size * idx
+                };
+            }
+
+            throw Domain::Invalid_Variant_Value(domain->variant);
+        }
+
+        const Domain_View operator[](size_t idx) const noexcept(false) {
             if (!Domain::is_complex(domain->variant) && !Domain::is_array(domain->variant))
                 throw Not_Complex_Variant(domain->variant);
 
@@ -874,6 +930,7 @@ namespace toad_db {
                     [get_length()-1] = value;
         }
 
+
         /**
          * Array pop.
          **/
@@ -965,6 +1022,27 @@ namespace toad_db {
                     new_elem.data += new_elem.domain->size_of();
                 }
             }
+        }
+        /**
+         * Push value to the array.
+         *
+         * @param new value.
+         **/
+        void array_push(const Domain_View &value) noexcept(false) {
+            if (!Domain::is_array(domain->variant))
+                throw Not_Array_Variant(domain->variant);
+
+
+            const auto &elem_domain = domain->domains->at(domain->array.idx);
+            const auto &new_elem_domain = *value.domain;
+
+            if (!Domain::is_competible(elem_domain, new_elem_domain))
+                throw Assign_Incompetible_Domains(elem_domain.domain_name, 
+                                                new_elem_domain.domain_name);
+
+            set_length(get_length()+1); // will throw if overflow.
+
+            operator[](get_length()-1).assign(value); 
         }
 
         friend std::string to_string(Domain_View view) {
@@ -1058,9 +1136,16 @@ namespace toad_db {
         }
     };
 
+
+
+    /**
+     * Table.
+     **/
     class Table {
         std::vector<Domain> columns_domains;
-        std::vector<Domain_Value> data;
+        std::vector<char> data;
+
+        Table(std::initializer_list<Domain> domains): columns_domains(domains)  { }
     };
 }
 

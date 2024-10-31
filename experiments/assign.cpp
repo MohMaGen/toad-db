@@ -1,11 +1,26 @@
 #include <common.hpp>
 #include <cstddef>
+#include <functional>
 #include <iostream>
 
+
+std::ostream& operator<<(std::ostream& os, std::function<void (std::ostream&)> fun) {
+	fun(os);
+	return os;
+} 
 
 int main(void) {
     using namespace toad_db;
     using namespace types;
+
+    std::string indent = "";
+    const auto endl = [&](std::ostream& os) {
+        os << "\n" << indent;
+        std::cout.flush();
+    };
+    const auto endlnf = [&](std::ostream& os) {
+        os << "\n" << indent;
+    };
 
     auto domains = Domain::default_domains();
     char data[0xFFFF] { '\0' };
@@ -17,7 +32,7 @@ int main(void) {
 
 
     const auto print = [&]() {
-        std::cout << "fst: " << to_string(fst) << ", snd: " << to_string(snd) << std::endl; 
+        std::cout << "fst: " << to_string(fst) << ", snd: " << to_string(snd) << endl; 
     };
 
     fst.set_basic<I32>(10); 
@@ -45,12 +60,13 @@ int main(void) {
         return res;
     };
 
-    const auto print_person = [&](Domain_View &person) {
-        std::cout << "Person {\n"
-                        << "  name: " << display_string(person["name"]) << "\n"
-                        << "  raw_name: " << to_string(person["name"]) << "\n" 
-                        << "  age: " << to_string(person["age"]) << "\n"
-                  << "}\n";
+
+    const auto print_person = [&](const Domain_View &person) {
+        std::cout << "Person {" << endlnf
+                        << "  name: " << display_string(person["name"]) << endlnf
+                        << "  raw_name: " << to_string(person["name"]) << endlnf 
+                        << "  age: " << to_string(person["age"]) << endlnf
+                  << "}" << endl;
     };
 
     Domain_View person { &domains("Person"), snd.data + sizeof(I32) + 10 };
@@ -74,5 +90,31 @@ int main(void) {
     print_person(person);
     print_person(cs_student);
 
+    domains.add({ "Persons", Domain::Array_Variant::Array, domains["Person"], 256}); 
+    char *data2 = new char[domains("Persons").size_of()];
+
+    Domain_View persons { &domains("Persons"), data2 };
+    const auto print_persons = [&](const Domain_View &persons) {
+        std::cout << "Persons " << persons.get_length() << " {" << endl;
+
+        for (size_t i = 0; i < persons.get_length(); i++) {
+            indent = "  ";
+            std::cout << endl;
+            print_person(persons[i]); 
+            indent = "";
+            std::cout << endl;
+        }
+
+        std::cout << "}" << endl;
+    };
+
+    print_persons(persons);
+
+    persons.set_length(0); 
+    persons.array_push(person); 
+
+    print_persons(persons);
+
+    delete[] data2;
 	return 0;
 }
