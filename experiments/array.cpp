@@ -10,7 +10,6 @@ int main() {
     domains.add({ "U8[10]", Domain::Array_Variant::Array, domains["U8"], 10 }); 
 
     char data[256] { '\0' };
-
     Domain_View view { &domains("U8[10]"), data };
 
     const auto print = [&]() {
@@ -29,7 +28,7 @@ int main() {
     view.set_length(0); 
     print();
 
-    view.array_push_basic<U8>(0); 
+    view.array_push_basic<U8>(12); 
     print();
 
     view.array_push_basic<U8>(2); 

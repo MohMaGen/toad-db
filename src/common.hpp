@@ -118,6 +118,21 @@ namespace toad_db {
                 cp_domain.domains = this;
                 data.push_back(cp_domain);
             }
+
+            const Domain& at(size_t idx) const noexcept(false) {
+                return operator[](idx);
+            }
+
+            Domain& at(size_t idx) noexcept(false) {
+                return operator[](idx);
+            }
+            const Domain& at(const std::string &idx) const noexcept(false) {
+                return operator()(idx);
+            }
+            Domain& at(const std::string &idx) noexcept(false) {
+                return operator()(idx);
+            }
+
         } *domains;
 
         /**
@@ -184,19 +199,32 @@ namespace toad_db {
         template<> constexpr Variant type2variant<types::F64>() { return Variant::F64; }
         template<> constexpr Variant type2variant<types::Bool>() { return Variant::Bool; }
 
-        friend constexpr bool is_basic(Variant variant) {
-            if ((char)variant < (char)Variant::Array) return true;
-            return false;
+        static constexpr bool is_basic(Variant variant) {
+            return (char)variant < (char)Variant::Array;
         }
 
-        friend constexpr bool is_array(Variant variant) {
-            if ((char)variant == (char)Variant::Array) return true;
-            return false;
+        static constexpr bool is_array(Variant variant) {
+            return (char)variant == (char)Variant::Array;
         }
 
-        friend constexpr bool is_complex(Variant variant) {
-            if ((char)variant > (char)Variant::Array) return true;
-            return false;
+        static constexpr bool is_complex(Variant variant) {
+            return (char)variant > (char)Variant::Array;
+        }
+
+        static constexpr bool is_sint(Variant variant) {
+            return (char)variant > (char)Variant::U64 && (char)variant < (char)Variant::F32;
+        }
+
+        static constexpr bool is_uint(Variant variant) {
+            return (char)variant < (char)Variant::I8;
+        }
+
+        static constexpr bool is_float(Variant variant) {
+            return (char)variant > (char)Variant::I64 && (char)variant < (char)Variant::Bool;
+        }
+
+        static constexpr bool is_bool(Variant variant) {
+            return variant == Variant::Bool;
         }
 
         /**
@@ -228,7 +256,7 @@ namespace toad_db {
          * @param max_value - max value that counter can be.
          * @param value - new value of the counter.
          **/
-        static constexpr void set_counter(char *data, size_t max_value, size_t value) {
+        static constexpr void set_counter(types::U8 *data, size_t max_value, size_t value) {
             using namespace types;
 
             if (max_value <= 0xFF)           *(U8*)data = (U8)value;
@@ -244,12 +272,60 @@ namespace toad_db {
          * @param max_value - max value that counter can be.
          * @return value of the counter.
          **/
-        static constexpr size_t get_counter(char *data, size_t max_value) {
+        static constexpr size_t get_counter(types::U8 *data, size_t max_value) {
             using namespace types;
 
             if (max_value <= 0xFF)           return (size_t)*(U8*)data;
             else if (max_value <= 0xFFFF)    return (size_t)*(U16*)data;
             else                             return (size_t)*(U32*)data;
+        }
+
+
+
+
+        /**
+         * Check if first domain competible to the second.
+         *
+         * If domains both basic and of the same variant, then they are competible.
+         * If domains both array and their element are competible, then they are competible.
+         * If domains both complex and second fields starts with the fields that all
+         *      corresponding first domain's fields competible to seconds, then they are competible.
+         *
+         * Otherwise first domain are not competible to the second.
+         *
+         * @param fst - first domain.
+         * @param snd - second domain.
+         * @return result.
+         **/
+        static bool is_competible(const Domain& fst, const Domain& snd) noexcept(true) {
+            if (fst.domains != snd.domains) return false;
+
+            if (is_basic(fst.variant) && is_basic(snd.variant))
+                return fst.variant == snd.variant;
+
+            if (is_array(fst.variant) && is_array(snd.variant))
+                return is_competible(fst.domains->at(fst.array.idx),
+                                        snd.domains->at(snd.array.idx));
+
+            if (is_complex(fst.variant) && is_complex(snd.variant)) {
+                if (fst.variant != snd.variant) return false;
+
+                auto fst_field = fst.complex_fields.begin();
+                for (auto &snd_field: snd.complex_fields) {
+                    auto &fst_field_domain = fst.domains->at(fst_field->domain_idx);
+                    auto &snd_field_domain = snd.domains->at(snd_field.domain_idx);
+
+                    if (!is_competible(fst_field_domain, snd_field_domain))
+                        return false;
+
+                    fst_field++;
+                    if (fst_field == fst.complex_fields.end()) return true;
+                }
+
+                return false;
+            }  
+
+            return false;
         }
 
 
@@ -487,11 +563,11 @@ namespace toad_db {
             size = domain->size_of();
 
             if (size > 8) {
-                big_data = (char*)std::malloc(size);
+                big_data = (types::U8*)std::malloc(size);
             }
         }
 
-        char* data() {
+        types::U8* data() {
             if (size > 8) {
                 return big_data;
             } else {
@@ -501,8 +577,8 @@ namespace toad_db {
         private:
         size_t size;
         union {
-            std::array<char, 8> small_data { 0 };
-            char* big_data;
+            std::array<types::U8, 8> small_data { 0 };
+            types::U8* big_data;
         };
     };
 
@@ -530,14 +606,16 @@ namespace toad_db {
      **/
     struct Domain_View {
         Domain *domain;
-        char *data;
+        types::U8 *data;
 
         Domain_View(Domain *domain, Domain_Value *domain_value):
             domain(domain), data(domain_value->data()) {}
 
         Domain_View(Domain *domain, char *data):
-            domain(domain), data(data) { }
+            domain(domain), data((types::U8*)data) { }
 
+        Domain_View(Domain *domain, types::U8 *data):
+            domain(domain), data(data) { }
         /**
          * Try to unwrap wrong variant.
          **/
@@ -624,22 +702,22 @@ namespace toad_db {
          * Get Domain_View of the field by field name.
          **/
         Domain_View operator[](const std::string &name) {
-            if (!is_complex(domain->variant)) throw Not_Complex_Variant(domain->variant);
+            if (!Domain::is_complex(domain->variant)) throw Not_Complex_Variant(domain->variant);
 
             size_t offset = 0;
             size_t idx = 0;
             for (auto &field: domain->complex_fields) {
                 Domain *field_domain = &(*domain->domains)[field.domain_idx];
-                offset += field_domain->size_of();
 
                 if (field.field_name == name) {
                     if (domain->variant == Domain::Variant::Add) {
                         const size_t fields_count = domain->complex_fields.size();
                         Domain::set_counter(data, fields_count, idx);
+                        offset += Domain::counter_size_of(fields_count); 
                     }
-
                     return Domain_View { field_domain, data + offset, };
                 }
+                offset += field_domain->size_of();
                 idx++;
             }
 
@@ -696,17 +774,17 @@ namespace toad_db {
 
 
         Domain_View operator[](size_t idx) noexcept(false) {
-            if (!is_complex(domain->variant) && !is_array(domain->variant))
+            if (!Domain::is_complex(domain->variant) && !Domain::is_array(domain->variant))
                 throw Not_Complex_Variant(domain->variant);
 
-            if (is_complex(domain->variant)) {
+            if (Domain::is_complex(domain->variant)) {
                 if (idx >= domain->complex_fields.size())
                     throw Field_Idx_Out_Of_Range(idx, domain->complex_fields.size());
 
                 return operator[](domain->complex_fields[idx].field_name);
             } 
 
-            if (is_array(domain->variant)) {
+            if (Domain::is_array(domain->variant)) {
                 size_t len = Domain::get_counter(data, domain->array.capacity);
                 if (idx >= len)
                     throw Array_Idx_Out_Of_Range(idx, len);
@@ -750,7 +828,7 @@ namespace toad_db {
          * @throws Access_Length_Not_From_Array_Domain if domain is not an array variant.
          **/
         constexpr size_t get_length(void) const noexcept(false) {
-            if (!is_array(domain->variant))
+            if (!Domain::is_array(domain->variant))
                 throw Not_Array_Variant(domain->variant);
 
             return Domain::get_counter(data, domain->array.capacity); 
@@ -765,7 +843,7 @@ namespace toad_db {
          * @throws Not_Array_Variant if domain is not an array variant.
          **/
         constexpr void set_length(size_t length) noexcept(false) {
-            if (!is_array(domain->variant))
+            if (!Domain::is_array(domain->variant))
                 throw Not_Array_Variant(domain->variant);
 
             if (length > domain->array.capacity)
@@ -783,7 +861,7 @@ namespace toad_db {
          **/
         template<typename Type>
         void array_push_basic(Type value) noexcept(false) {
-            if (!is_array(domain->variant))
+            if (!Domain::is_array(domain->variant))
                 throw Not_Array_Variant(domain->variant);
 
             if (Domain::type2variant<Type>() != (*domain->domains)[domain->array.idx].variant)
@@ -791,14 +869,16 @@ namespace toad_db {
 
             set_length(get_length()+1); // will throw if overflow.
 
-            ((Type*)data)[get_length()] = value;
+
+            ((Type*)(data + Domain::counter_size_of(domain->array.capacity)))
+                    [get_length()-1] = value;
         }
 
         /**
          * Array pop.
          **/
-        void array_pop(void) noexcept(false) {
-            if (!is_array(domain->variant))
+        constexpr void array_pop(void) noexcept(false) {
+            if (!Domain::is_array(domain->variant))
                 throw Not_Array_Variant(domain->variant);
 
             if (get_length() == 0)
@@ -807,9 +887,88 @@ namespace toad_db {
             set_length(get_length()-1);
         }
 
+        class Assign_Incompetible_Domains: public Toad_Exception {
+            public:
+                Assign_Incompetible_Domains(const std::string& dest, const std::string& orig):
+                    Toad_Exception("Can't assign value of domain `" + orig + "`"
+                                        + " to the value of domain `"+ dest + "`") { }
+        };
+
+        void assign(const Domain_View &new_value) noexcept(false) {
+            Domain::Variant orig_variant = new_value.domain->variant;
+            Domain::Variant dest_variant = domain->variant;
+            const std::string &orig_name = new_value.domain->domain_name;
+            const std::string &dest_name = new_value.domain->domain_name;
+
+            if (!Domain::is_competible(*domain, *new_value.domain))
+                throw Assign_Incompetible_Domains(dest_name, orig_name);
+
+            if (Domain::is_basic(orig_variant)) { //TODO: support for the different sized values.
+                std::memcpy(data, new_value.data, domain->size_of());
+                return;
+            }
+
+            if (Domain::is_array(dest_variant)) {
+                if (new_value.get_length() > domain->array.capacity)
+                    throw Array_Length_Out_Of_Bounds(new_value.get_length(), domain->array.capacity);
+
+                Domain *elem_domain = &domain->domains->at(domain->array.idx);
+                Domain *new_elem_domain = &domain->domains->at(new_value.domain->array.idx);
+
+                size_t elem_size = elem_domain->size_of();
+                size_t new_elem_size = new_elem_domain->size_of();
+
+                Domain_View elem { elem_domain,
+                            data + Domain::counter_size_of(domain->array.capacity) };
+                Domain_View new_elem { new_elem_domain,
+                            new_value.data + Domain::counter_size_of(new_value.domain->array.capacity) };
+
+                Domain::set_counter(data, domain->array.capacity, new_value.get_length()); 
+
+                for (size_t i = 0; i < new_value.get_length(); i++) {
+                    elem.assign(new_elem); 
+                    elem.data += elem_size;
+                    new_elem.data += new_elem_size;
+                }
+            } 
+
+            if (dest_variant == Domain::Variant::Add) {
+                size_t new_variant = Domain::get_counter(new_value.data,
+                                                         new_value.domain->complex_fields.size());
+                Domain::set_counter(data, domain->complex_fields.size(), new_variant);
+
+                const auto &field = domain->complex_fields[new_variant];
+                const auto &new_field = new_value.domain->complex_fields[new_variant];
+
+                Domain_View elem { &domain->domains->at(field.domain_idx), 
+                                   data + Domain::counter_size_of(domain->complex_fields.size()) };
+                Domain_View new_elem { &domain->domains->at(new_field.domain_idx),
+                                       data + Domain::counter_size_of(new_value.domain->complex_fields.size()) }; 
+
+                elem.assign(new_elem); 
+            }
+
+            if (dest_variant == Domain::Variant::Mul) {
+                Domain_View elem { nullptr, data}; 
+                Domain_View new_elem { nullptr, new_value.data};
+
+                for (size_t i = 0; i < domain->complex_fields.size(); i++) {
+                    const auto &field = domain->complex_fields[i];
+                    const auto &new_field = new_value.domain->complex_fields[i];
+
+                    elem.domain = &domain->domains->at(field.domain_idx);
+                    new_elem.domain = &domain->domains->at(new_field.domain_idx);
+
+                    elem.assign(new_elem);
+
+                    elem.data += elem.domain->size_of();
+                    new_elem.data += new_elem.domain->size_of();
+                }
+            }
+        }
 
         friend std::string to_string(Domain_View view) {
-            if (is_basic(view.domain->variant)) {
+            if (Domain::is_basic(view.domain->variant)) {
 
                 switch (view.domain->variant) {
                 case Domain::Variant::U8:
@@ -852,7 +1011,7 @@ namespace toad_db {
                 }
 
             }
-            if (is_array(view.domain->variant)) {
+            if (Domain::is_array(view.domain->variant)) {
                 size_t len = view.get_length(); 
 
                 std::string ret = view.domain->domain_name
