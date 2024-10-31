@@ -104,7 +104,7 @@ void register_experiments(void) {
         const char *curr = files.items[i];
         if (strendswith(curr, ".cpp")) {
             char *source = nob_temp_sprintf("%s/%s", EXPERIMENT_DIR, curr);
-            char *binary = nob_temp_sprintf("%s/_exp_%s_", BUILD_DIR, curr);
+            char *binary = nob_temp_sprintf("%s/%s_exp", BUILD_DIR, curr);
 
             nob_log(NOB_INFO, "register experiment: `%s` => `%s`.", source, binary); 
             nob_da_append(&experiments_srcs, source);
@@ -120,10 +120,11 @@ bool build_experiments(Nob_Cmd *cmd) {
         Nob_File_Paths deps = { 0 };
         nob_da_append(&deps, experiments_srcs.items[i]);
         nob_da_append_many(&deps, objects.items, objects.count);
+        nob_da_append_many(&deps, headers.items, objects.count);
 
         int ret = nob_needs_rebuild(experiments_bins.items[i], deps.items, deps.count); 
         if (ret < 0) return false;
-        if (!ret) return true;
+        if (!ret) continue;
 
         nob_cmd_append(cmd, CCPP, COMPILER_FLAGS, INCLUDE_DIRS, "-o", experiments_bins.items[i], experiments_srcs.items[i]); 
         nob_da_append_many(cmd, objects.items, objects.count);
