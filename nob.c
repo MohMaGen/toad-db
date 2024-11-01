@@ -21,6 +21,11 @@ bool strendswith(const char* str, const char* suf) {
 #define COMPILER_FLAGS          "-Wall", "--std=c++23", "-Werror", "-pedantic", "-g"
 #define INCLUDE_DIRS_STRING     "-I" SOURCE_DIR
 #define INCLUDE_DIRS            "-I", SOURCE_DIR
+//#define LD_FLAGS_STRING         "-lncurses"
+//#define LD_FLAGS                "-lncurses"
+
+#define LD_FLAGS_STRING         ""
+#define LD_FLAGS                ""
 
 Nob_File_Paths headers = { 0 };
 Nob_File_Paths sources = { 0 };
@@ -44,8 +49,9 @@ bool generate_compile_commands(void) {
 
         fprintf(compile_commands, "       \"file\":\"%s\",\n", source); 
         fprintf(compile_commands, "       \"directory\":\"%s\",\n", nob_get_current_dir_temp()); 
-        fprintf(compile_commands, "       \"command\":\"%s %s %s -o %s %s\"\n",
-                    CCPP, COMPILER_FLAGS_STRING, INCLUDE_DIRS_STRING, object, source);
+        fprintf(compile_commands, "       \"command\":\"%s %s %s %s -o %s %s\"\n",
+                    CCPP, COMPILER_FLAGS_STRING, INCLUDE_DIRS_STRING, LD_FLAGS_STRING,
+                    object, source);
 
         fprintf(compile_commands, "    },\n");
     }
@@ -57,8 +63,9 @@ bool generate_compile_commands(void) {
 
         fprintf(compile_commands, "       \"file\":\"%s\",\n", source); 
         fprintf(compile_commands, "       \"directory\":\"%s\",\n", nob_get_current_dir_temp()); 
-        fprintf(compile_commands, "       \"command\":\"%s %s %s -o %s %s\"\n",
-                    CCPP, COMPILER_FLAGS_STRING, INCLUDE_DIRS_STRING, object, source);
+        fprintf(compile_commands, "       \"command\":\"%s %s %s %s -o %s %s\"\n",
+                    CCPP, COMPILER_FLAGS_STRING, INCLUDE_DIRS_STRING, LD_FLAGS_STRING,
+                    object, source);
 
         fprintf(compile_commands, "    }%s", i == sources.count-1 ? "\n" : ",\n");
     }
@@ -126,7 +133,7 @@ bool build_experiments(Nob_Cmd *cmd) {
         if (ret < 0) return false;
         if (!ret) continue;
 
-        nob_cmd_append(cmd, CCPP, COMPILER_FLAGS, INCLUDE_DIRS, "-o", experiments_bins.items[i], experiments_srcs.items[i]); 
+        nob_cmd_append(cmd, CCPP, COMPILER_FLAGS, INCLUDE_DIRS, LD_FLAGS, "-o", experiments_bins.items[i], experiments_srcs.items[i]); 
         nob_da_append_many(cmd, objects.items, objects.count);
 
         Nob_Proc proc = nob_cmd_run_async_and_reset(cmd); 
@@ -164,7 +171,8 @@ int main(int argc, char **argv) {
         if (ret < 0) return 1;
         if (!ret) continue;
 
-        nob_cmd_append(&cmd, CCPP, COMPILER_FLAGS, INCLUDE_DIRS, "-o", object, "-c", source);
+        nob_cmd_append(&cmd, CCPP, COMPILER_FLAGS, INCLUDE_DIRS, LD_FLAGS, 
+                        "-o", object, "-c", source);
         Nob_Proc proc = nob_cmd_run_async_and_reset(&cmd); 
         nob_da_append(&procs, proc);
         nob_da_free(deps);

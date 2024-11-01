@@ -595,6 +595,10 @@ namespace toad_db {
 
         Domain_View(Domain *domain, types::U8 *data):
             domain(domain), data(data) { }
+
+        Domain_View(Domain *domain, const types::U8 *data):
+            domain(domain), data((types::U8*)data) { }
+
         /**
          * Try to unwrap wrong variant.
          **/
@@ -1223,7 +1227,7 @@ namespace toad_db {
         std::vector<Collumn_Field> columns_fields;
         size_t row_size;
 
-        std::vector<char> data { };
+        std::vector<types::U8> data { };
 
         class Failed_To_Insert_Row: public Toad_Exception {
             public:
@@ -1240,6 +1244,7 @@ namespace toad_db {
             }
         }
 
+
         /**
          * Insert Row
          *
@@ -1254,8 +1259,8 @@ namespace toad_db {
             Domain_View in { row_field->domain, row_field->data };
 
             try {
-                for (auto &collumn_domain: columns_fields) {
-                    out.domain = &collumn_domain.domain;
+                for (auto &column_field: columns_fields) {
+                    out.domain = &column_field.domain;
 
                     out.assign(in); 
 
@@ -1270,11 +1275,10 @@ namespace toad_db {
             data.assign(row_data.get(), row_data.get() + row_size);
         }
 
-        friend  Table& operator<<(Table& table,
-                                  const std::vector<Domain_View> &row_value);
-
-
+        friend Table& operator<<(Table& table, const std::vector<Domain_View> &row_value);
+        friend std::ostream& operator<<(std::ostream& os, const Table& table);
     };
+
 }
 
 #endif
