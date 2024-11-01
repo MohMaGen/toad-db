@@ -5,8 +5,8 @@
 
 
 std::ostream& operator<<(std::ostream& os, std::function<void (std::ostream&)> fun) {
-	fun(os);
-	return os;
+    fun(os);
+    return os;
 } 
 
 int main(void) {

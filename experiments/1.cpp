@@ -12,7 +12,7 @@ int main() {
     }
 
     toad_db::Domain_Value value { &domains("Bool") };
-    toad_db::Domain_View view { &domains("Bool"), &value };
+    auto view = value.view();
 
     view.set_basic(Bool(false)); 
     view.unwrap_basic<Bool>() = true; 
@@ -21,7 +21,7 @@ int main() {
     std::cout << "Mul is " << (int)(char)toad_db::Domain::Variant::Mul << std::endl;
 
     toad_db::Domain_Value date { &domains("Date") };
-    view = { &domains("Date"), &date };
+    view = date.view();
 
     view["day"].set_basic<U8>(26); 
 
@@ -51,7 +51,7 @@ int main() {
                             { "v4", domains["Vector4"]}}});
 
     toad_db::Domain_Value vector { &domains("Vector") };
-    view = { &domains("Vector"), &vector };
+    view = vector.view();
     view["v2"]["x"].set_basic<F32>(2.5);
     view["v2"]["y"].set_basic<F32>(4.5);
 

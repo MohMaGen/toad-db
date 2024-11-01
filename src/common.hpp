@@ -2,13 +2,14 @@
 #define __COMMON_GUARS_H__
 
 #include <algorithm>
-#include <cstdarg>
+#include <span>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
-#include <span>
+#include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 
@@ -227,6 +228,10 @@ namespace toad_db {
 
         static constexpr bool is_bool(Variant variant) {
             return variant == Variant::Bool;
+        }
+
+        constexpr bool is_string(void) {
+            return is_array(variant) && domains->at(array.idx).variant == Variant::I8;
         }
 
         /**
@@ -486,9 +491,13 @@ namespace toad_db {
                         { "year", domains["Year"]},
                         { "time", domains["Seconds"]}}});
 
+           	domains.add({ "Str",     Array_Variant::Array, domains["I8"], 64 });
+           	domains.add({ "String",  Array_Variant::Array, domains["I8"], 0xFF });
+           	domains.add({ "Text",    Array_Variant::Array, domains["I8"], 1024 });
+           	domains.add({ "BigText", Array_Variant::Array, domains["I8"], 0xFFFF });
+
             return domains;
         }
-
 
         class Invalid_Variant_Value: public Toad_Exception {
             public:
@@ -557,33 +566,6 @@ namespace toad_db {
 
 
 
-    /**
-     * Contains value of specific domain.
-     **/
-    struct Domain_Value {
-        Domain_Value(Domain* domain) {
-            size = domain->size_of();
-
-            if (size > 8) {
-                big_data = (types::U8*)std::malloc(size);
-            }
-        }
-
-        types::U8* data() {
-            if (size > 8) {
-                return big_data;
-            } else {
-                return small_data.data();
-            }
-        }
-        private:
-        size_t size;
-        union {
-            std::array<types::U8, 8> small_data { 0 };
-            types::U8* big_data;
-        };
-    };
-
 
     /**
      * Interface to interact with domain values.
@@ -609,9 +591,6 @@ namespace toad_db {
     struct Domain_View {
         Domain *domain;
         types::U8 *data;
-
-        Domain_View(Domain *domain, Domain_Value *domain_value):
-            domain(domain), data(domain_value->data()) {}
 
         Domain_View(Domain *domain, char *data):
             domain(domain), data((types::U8*)data) { }
@@ -1134,18 +1113,158 @@ namespace toad_db {
 
             throw Domain::Invalid_Variant_Value(view.domain->variant);
         }
+
+        /**
+         * Display as string domains that are array of I8 (char).
+         **/
+        std::string unwrap_string() {
+            if (!Domain::is_array(domain->variant))
+                throw Not_Array_Variant(domain->variant);
+
+            if (domain->domains->at(domain->array.idx).variant == Domain::Variant::I8)
+                throw Toad_Exception("Not a string");
+
+            std::string res { };
+
+            for (size_t i = 0; i < get_length(); i++) {
+                res.push_back(operator[](i).unwrap_basic<types::I8>());
+            }
+
+            return res;
+        }
     };
+
+
+    /**
+     * Contains value of specific domain.
+     *
+     * This container owns value of the domain and
+     * allows to interct with that through the Domain_View.
+     **/
+    template<size_t Min_Size_To_Alloc = 8>
+    class Domain_Value {
+        Domain *domain;
+        size_t size;
+        union {
+            std::array<types::U8, Min_Size_To_Alloc> small_data { 0 };
+            types::U8* big_data;
+        };
+
+        public:
+            Domain_Value<Min_Size_To_Alloc>(Domain* domain): domain(domain) {
+                size = domain->size_of();
+
+                if (size > Min_Size_To_Alloc) {
+                    big_data = (types::U8*)std::malloc(size);
+                }
+            }
+
+            ~Domain_Value<Min_Size_To_Alloc>(void) {
+                if (size > Min_Size_To_Alloc) {
+                    free(big_data);
+                } 
+            }
+
+            class Wrong_Domain_Value_Constructor: public Toad_Exception {
+                public:
+                    Wrong_Domain_Value_Constructor(const std::string &domain_name,
+                                                   const std::string& why):
+                        Toad_Exception("Failed to construct value of domain `"
+                                + domain_name + "`: " + why) {} 
+            };
+
+
+            /**
+             * Gets domain view to the value.
+             *
+             * @return Domain_View to the owning value.
+             **/
+            Domain_View view(void) {
+                return Domain_View { domain, size > Min_Size_To_Alloc ? big_data : small_data.data() };
+            }
+    };
+
+    template<size_t Min_Size_To_Alloc = 8, typename T>
+    make_domain_value(Domain *domain, const T& value);
+
+	template<size_t Min_Size_To_Alloc>
+    Domain_Value<Min_Size_To_Alloc>
+    make_domain_value<Min_Size_To_Alloc, std::string>(Domain *domain, const std::string& string) {
+        if (!domain->is_string())
+            throw Domain_Value<Min_Size_To_Alloc>::Wrong_Domain_Value_Constructor(domain->domain_name,
+                                                "Try to construct string value not to for string domain");
+
+        Domain_Value<Min_Size_To_Alloc> ret { domain };
+        for (auto c: string) {
+            ret.view().template array_push_basic<types::I8>((types::I8)c);
+        }
+
+        return ret;
+    }
+
 
 
 
     /**
      * Table.
      **/
-    class Table {
-        std::vector<Domain> columns_domains;
-        std::vector<char> data;
+    struct Table {
+        struct Collumn_Field {
+            std::string name;
+            Domain &domain;
+        };
 
-        Table(std::initializer_list<Domain> domains): columns_domains(domains)  { }
+        std::vector<Collumn_Field> columns_fields;
+        size_t row_size;
+
+        std::vector<char> data { };
+
+        class Failed_To_Insert_Row: public Toad_Exception {
+            public:
+                Failed_To_Insert_Row(Toad_Exception& problem):
+                    Toad_Exception(std::string("Failed to insert row: ") + problem.what()) {} 
+        };
+
+
+        Table(std::initializer_list<Collumn_Field> fields): columns_fields(fields)  { 
+            row_size = 0;
+
+            for (auto collumn_field: columns_fields) {
+                row_size += collumn_field.domain.size_of();
+            }
+        }
+
+        /**
+         * Insert Row
+         *
+         * @row_value - vector of domain value to insert to the row.
+         **/
+        void insert_row(const std::vector<Domain_View> &row_value) {
+            auto row_field = row_value.begin();
+
+            auto row_data = std::unique_ptr<types::U8>(new types::U8[row_size]);
+
+            Domain_View out { nullptr, row_data.get() };
+            Domain_View in { row_field->domain, row_field->data };
+
+            try {
+                for (auto &collumn_domain: columns_fields) {
+                    out.domain = &collumn_domain.domain;
+
+                    out.assign(in); 
+
+                    out.data += out.domain->size_of();
+                    in.data   = (++row_field)->data;
+                    in.domain = row_field->domain;
+                }
+            } catch (Toad_Exception& te) {
+                throw Failed_To_Insert_Row(te);
+            }
+
+            data.assign(row_data.get(), row_data.get() + row_size);
+        }
+
+        friend  Table& operator<<(Table& table, const std::vector<Domain_View> &row_value);
     };
 }
 

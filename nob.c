@@ -17,8 +17,8 @@ bool strendswith(const char* str, const char* suf) {
 #define EXPERIMENT_DIR "experiments"
 #define CCPP "clang++"
 
-#define COMPILER_FLAGS_STRING   "-Wall --std=c++20 -Werror -pedantic -g"
-#define COMPILER_FLAGS          "-Wall", "--std=c++20", "-Werror", "-pedantic", "-g"
+#define COMPILER_FLAGS_STRING   "-Wall --std=c++23 -Werror -pedantic -g"
+#define COMPILER_FLAGS          "-Wall", "--std=c++23", "-Werror", "-pedantic", "-g"
 #define INCLUDE_DIRS_STRING     "-I" SOURCE_DIR
 #define INCLUDE_DIRS            "-I", SOURCE_DIR
 
