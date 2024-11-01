@@ -1270,7 +1270,10 @@ namespace toad_db {
             data.assign(row_data.get(), row_data.get() + row_size);
         }
 
-        friend  Table& operator<<(Table& table, const std::vector<Domain_View> &row_value);
+        friend  Table& operator<<(Table& table,
+                                  const std::vector<Domain_View> &row_value);
+
+
     };
 }
 
