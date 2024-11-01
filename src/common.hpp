@@ -7,9 +7,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
-#include <ranges>
 #include <stdexcept>
-#include <tuple>
 #include <vector>
 
 
@@ -1132,6 +1130,16 @@ namespace toad_db {
 
             return res;
         }
+
+        void set_string(const std::string& string) {
+            if (!domain->is_string())
+                throw Unwrap_Invalid_Variant(domain->variant, domain->variant);
+
+            set_length(0); 
+            for (auto c: string) {
+                array_push_basic<types::I8>((types::I8)c);
+            }
+        }
     };
 
 
@@ -1185,11 +1193,11 @@ namespace toad_db {
     };
 
     template<size_t Min_Size_To_Alloc = 8, typename T>
-    make_domain_value(Domain *domain, const T& value);
+    Domain_Value<Min_Size_To_Alloc> make_domain_value(Domain *domain, const T& value);
 
 	template<size_t Min_Size_To_Alloc>
     Domain_Value<Min_Size_To_Alloc>
-    make_domain_value<Min_Size_To_Alloc, std::string>(Domain *domain, const std::string& string) {
+    make_domain_value(Domain *domain, const std::string& string) {
         if (!domain->is_string())
             throw Domain_Value<Min_Size_To_Alloc>::Wrong_Domain_Value_Constructor(domain->domain_name,
                                                 "Try to construct string value not to for string domain");
@@ -1201,8 +1209,6 @@ namespace toad_db {
 
         return ret;
     }
-
-
 
 
     /**

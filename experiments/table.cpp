@@ -14,11 +14,15 @@ int main(void) {
 
     Domain_Value name { &domains("Str") };
     Domain_Value age { &domains("I32") };
+    name.view().set_string("Bob");
+    age.view().set_basic<I32>(23); 
 
     table.insert_row({ name.view(), age.view() });
 
-    Domain_Value name2 = make_domain_value(&domains("Str"), "Vlas");
-    table.insert_row(name2, age2); 
+    name.view().set_string("Bbib");
+    age.view().set_basic<I32>(32); 
+
+    table.insert_row({ name.view(), age.view() });
 
     return 0;
 }

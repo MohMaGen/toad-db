@@ -140,7 +140,7 @@ bool build_experiments(Nob_Cmd *cmd) {
 
 
 int main(int argc, char **argv) {
-    int result;
+    int result = 0;
     NOB_GO_REBUILD_URSELF(argc, argv);
 
     if (!nob_mkdir_if_not_exists(BUILD_DIR)) return 1;
