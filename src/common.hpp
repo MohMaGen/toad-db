@@ -2,6 +2,9 @@
 #define __COMMON_GUARS_H__
 
 #include <algorithm>
+#include <cstddef>
+#include <iterator>
+#include <ranges>
 #include <span>
 #include <cstdint>
 #include <cstring>
@@ -1066,7 +1069,7 @@ namespace toad_db {
                             + std::string(view.unwrap_basic<types::Bool>() ? "true" : "false")
                             + ")"; 
                 default:
-                    throw Toad_Exception("Unreachable!");
+                    throw Domain::Invalid_Variant_Value(view.domain->variant) ;
                 }
 
             }
@@ -1219,15 +1222,17 @@ namespace toad_db {
      * Table.
      **/
     struct Table {
-        struct Collumn_Field {
+        struct Column_Field {
             std::string name;
-            Domain &domain;
+            Domain *domain;
         };
 
-        std::vector<Collumn_Field> columns_fields;
-        size_t row_size;
+        private:
+            std::vector<Column_Field> _columns_fields;
+            size_t _row_size;
 
-        std::vector<types::U8> data { };
+            std::vector<types::U8> _data { };
+        public:
 
         class Failed_To_Insert_Row: public Toad_Exception {
             public:
@@ -1236,11 +1241,11 @@ namespace toad_db {
         };
 
 
-        Table(std::initializer_list<Collumn_Field> fields): columns_fields(fields)  { 
-            row_size = 0;
+        Table(std::initializer_list<Column_Field> fields): _columns_fields(fields)  { 
+            _row_size = 0;
 
-            for (auto collumn_field: columns_fields) {
-                row_size += collumn_field.domain.size_of();
+            for (auto collumn_field: _columns_fields) {
+                _row_size += collumn_field.domain->size_of();
             }
         }
 
@@ -1253,14 +1258,14 @@ namespace toad_db {
         void insert_row(const std::vector<Domain_View> &row_value) {
             auto row_field = row_value.begin();
 
-            auto row_data = std::unique_ptr<types::U8>(new types::U8[row_size]);
+            auto row_data = std::unique_ptr<types::U8>(new types::U8[_row_size]);
 
             Domain_View out { nullptr, row_data.get() };
             Domain_View in { row_field->domain, row_field->data };
 
             try {
-                for (auto &column_field: columns_fields) {
-                    out.domain = &column_field.domain;
+                for (auto &column_field: _columns_fields) {
+                    out.domain = column_field.domain;
 
                     out.assign(in); 
 
@@ -1272,12 +1277,210 @@ namespace toad_db {
                 throw Failed_To_Insert_Row(te);
             }
 
-            data.assign(row_data.get(), row_data.get() + row_size);
+            _data.insert(_data.begin() + _data.size(), row_data.get(), row_data.get() + _row_size);
         }
 
         friend Table& operator<<(Table& table, const std::vector<Domain_View> &row_value);
         friend std::ostream& operator<<(std::ostream& os, const Table& table);
+
+        struct Table_Iter {
+            struct Row_Iter {
+                using iterator_category = std::bidirectional_iterator_tag;
+                using difference_type   = std::ptrdiff_t;
+                using value_type        = Domain_View;
+                using reference         = value_type;
+
+                Row_Iter() { }
+
+                Row_Iter(types::U8* data, std::vector<Column_Field>::const_iterator field):
+                    _data(data), _field(field) { }
+
+                reference operator*(void) const {
+                    return Domain_View { _field->domain, _data };
+                }
+
+                Row_Iter& operator++(void) {
+                    _data += _field->domain->size_of();
+                    _field++;
+                    return *this;
+                }
+                Row_Iter operator++(int) {
+                    auto tmp = *this;
+                    operator++();
+                    return tmp;
+                }
+                Row_Iter& operator--(void) {
+                    _data -= _field->domain->size_of();
+                    _field--;
+                    return *this;
+                }
+                Row_Iter operator--(int) {
+                    auto tmp = *this;
+                    operator--();
+                    return tmp;
+                }
+
+                bool operator==(const Row_Iter& othr) const { 
+                    return _field == othr._field;
+                }
+
+                private:
+                    types::U8* _data;
+                    std::vector<Column_Field>::const_iterator _field;
+
+                friend Table_Iter;
+                friend Table;
+            };
+            static_assert(std::bidirectional_iterator<Row_Iter>);
+
+            struct Row {
+                Row_Iter _begin;
+                Row_Iter _end;
+                size_t _row_size;
+
+                Row (Row_Iter begin, Row_Iter end, size_t row_size):
+                    _begin(begin), _end(end), _row_size(row_size) { }
+                Row() { }
+
+                Row_Iter begin() const { return _begin; }
+                Row_Iter end() const { return _end; }
+            };
+
+            using iterator_category = std::random_access_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type    = Row;
+            using reference     = const value_type&;
+            using pointer       = value_type*;
+
+            Table_Iter() { }
+            Table_Iter(size_t row_width, std::vector<types::U8>::const_iterator row_data,
+                            const std::vector<Column_Field>* column_fields):
+
+                _row({ { (types::U8*)row_data.base(), column_fields->cbegin() },
+                        { (types::U8*)row_data.base(), column_fields->cend() },
+                         row_width}) { }
+
+            Table_Iter(size_t row_width, std::vector<types::U8>::iterator row_data,
+                            const std::vector<Column_Field>* column_fields):
+
+                _row({ { (types::U8*)row_data.base(), column_fields->cbegin() },
+                        { (types::U8*)row_data.base(), column_fields->cend() },
+                         row_width}) { }
+
+            Table_Iter(reference row): _row(row) { }
+
+
+            Table_Iter& operator++() {
+                _row._begin._data += _row._row_size;
+                return *this;
+            }
+
+            Table_Iter operator++(int) {
+                Table_Iter tmp = *this;
+                _row._begin._data += _row._row_size;
+                return tmp;
+            }
+
+            Table_Iter& operator--() {
+                _row._begin._data -= _row._row_size;
+                return *this;
+            }
+
+            Table_Iter operator--(int) {
+                Table_Iter tmp = *this;
+                _row._begin._data -= _row._row_size;
+                return tmp;
+            }
+
+            bool operator==(const Table_Iter& othr) const { 
+                return _row._begin._data == othr._row._begin._data;
+            }
+
+            bool operator>(const Table_Iter& othr) const { 
+                return _row._begin._data >  othr._row._begin._data; }
+            bool operator<(const Table_Iter& othr) const {
+                return _row._begin._data < othr._row._begin._data; }
+            bool operator>=(const Table_Iter& othr) const {
+                return _row._begin._data >=  othr._row._begin._data; }
+            bool operator<=(const Table_Iter& othr) const {
+                return _row._begin._data <= othr._row._begin._data; }
+
+            difference_type operator-(const Table_Iter& othr) const {
+                return (_row._begin._data - othr._row._begin._data)
+                        / (difference_type)_row._row_size;
+            }
+
+            Table_Iter& operator+=(difference_type diff) {
+                _row._begin._data += diff * _row._row_size;
+                return *this;
+            }
+
+            Table_Iter operator+(difference_type diff) const {
+                Table_Iter iter = *this;
+                iter += diff;
+                return iter;
+            }
+            friend Table_Iter operator+(difference_type diff, const Table_Iter &iter) {
+                return iter + diff;
+            }
+
+
+            Table_Iter& operator-=(difference_type diff) {
+                operator+=(-diff);
+                return *this;
+            }
+
+            Table_Iter operator-(difference_type diff) const {
+                return operator+(-diff);
+            }
+
+            reference operator[](difference_type diff) const {
+                return *(operator+(diff));
+            } 
+
+            reference operator*(void) const {
+                return _row;
+            }
+            pointer operator->(void) {
+                return &_row;
+            }
+
+
+            private:
+                value_type _row;
+
+            friend Table;
+        };
+
+        static_assert(std::random_access_iterator<Table_Iter>);
+        Table_Iter begin(void) {
+            return Table_Iter(_row_size, _data.begin(), &_columns_fields);
+        }
+
+        Table_Iter end(void) {
+            Table_Iter iter = Table_Iter(_row_size, _data.begin(), &_columns_fields);
+            iter._row._begin._data = (types::U8*)_data.end().base();
+            return iter;
+        }
+
+        Table_Iter cbegin(void) const {
+            return Table_Iter(_row_size, _data.begin(), &_columns_fields);
+        }
+
+        Table_Iter cend(void) const {
+            Table_Iter iter = Table_Iter(_row_size, _data.cbegin(), &_columns_fields);
+            iter._row._begin._data = (types::U8*)_data.end().base();
+            return iter;
+        }
+        Table_Iter begin(void) const {
+            return cbegin();
+        }
+
+        Table_Iter end(void) const {
+            return cend();
+        }
     };
+
 
 }
 

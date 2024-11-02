@@ -14,25 +14,16 @@ namespace toad_db {
 
     std::ostream& operator<<(std::ostream& os, const Table& table) {
         std::cout << "Table:" << std::endl;
- 		const std::string indent = "   ";
+        const std::string indent = "   ";
 
-        auto row_data = table.data.begin();
-        while (row_data != table.data.end()) {
+        for (auto &row: table) {
             std::cout << indent << "row:" << std::endl;
-            auto data = row_data.base();
 
-            for (auto &column_field: table.columns_fields) {
-                std::cout << indent << indent << column_field.name << ": ";
-
-                std::cout << to_string(Domain_View { &column_field.domain, data  })
-                                << std::endl;
-
-                data += column_field.domain.size_of();
+            for (auto field: row) {
+                std::cout << indent << indent << to_string(field) << std::endl;
             }
-
-            row_data += table.row_size;
+            std::cout << std::endl;
         }
-
 
         return os;
     }
