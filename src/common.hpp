@@ -1283,6 +1283,7 @@ namespace toad_db {
         friend Table& operator<<(Table& table, const std::vector<Domain_View> &row_value);
         friend std::ostream& operator<<(std::ostream& os, const Table& table);
 
+		template<typename _Iter>
         struct Table_Iter {
             struct Row_Iter {
                 using iterator_category = std::bidirectional_iterator_tag;
@@ -1292,11 +1293,11 @@ namespace toad_db {
 
                 Row_Iter() { }
 
-                Row_Iter(types::U8* data, std::vector<Column_Field>::const_iterator field):
+                Row_Iter(_Iter data, std::vector<Column_Field>::const_iterator field):
                     _data(data), _field(field) { }
 
                 reference operator*(void) const {
-                    return Domain_View { _field->domain, _data };
+                    return Domain_View { _field->domain, (types::U8*) _data.base() };
                 }
 
                 Row_Iter& operator++(void) {
@@ -1325,7 +1326,7 @@ namespace toad_db {
                 }
 
                 private:
-                    types::U8* _data;
+                    _Iter _data;
                     std::vector<Column_Field>::const_iterator _field;
 
                 friend Table_Iter;
@@ -1352,20 +1353,12 @@ namespace toad_db {
             using reference     = const value_type&;
             using pointer       = value_type*;
 
-            Table_Iter() { }
-            Table_Iter(size_t row_width, std::vector<types::U8>::const_iterator row_data,
+            Table_Iter<_Iter>() { }
+            Table_Iter<_Iter>(size_t row_width, _Iter row_data,
                             const std::vector<Column_Field>* column_fields):
-
-                _row({ { (types::U8*)row_data.base(), column_fields->cbegin() },
-                        { (types::U8*)row_data.base(), column_fields->cend() },
-                         row_width}) { }
-
-            Table_Iter(size_t row_width, std::vector<types::U8>::iterator row_data,
-                            const std::vector<Column_Field>* column_fields):
-
-                _row({ { (types::U8*)row_data.base(), column_fields->cbegin() },
-                        { (types::U8*)row_data.base(), column_fields->cend() },
-                         row_width}) { }
+                _row({ { row_data, column_fields->cbegin() },
+                        { row_data, column_fields->cend() },
+                        row_width }) { }
 
             Table_Iter(reference row): _row(row) { }
 
@@ -1452,32 +1445,37 @@ namespace toad_db {
             friend Table;
         };
 
-        static_assert(std::random_access_iterator<Table_Iter>);
-        Table_Iter begin(void) {
+        using Const_Iter = Table_Iter<std::vector<types::U8>::const_iterator>;
+        using Iter = Table_Iter<std::vector<types::U8>::iterator>;
+
+        static_assert(std::random_access_iterator<Const_Iter>);
+        static_assert(std::random_access_iterator<Iter>);
+        auto begin(void) {
             return Table_Iter(_row_size, _data.begin(), &_columns_fields);
         }
 
-        Table_Iter end(void) {
+        auto end(void) {
             Table_Iter iter = Table_Iter(_row_size, _data.begin(), &_columns_fields);
-            iter._row._begin._data = (types::U8*)_data.end().base();
+            iter._row._begin._data = _data.end();
             return iter;
         }
 
-        Table_Iter cbegin(void) const {
+        auto begin(void) const {
             return Table_Iter(_row_size, _data.begin(), &_columns_fields);
         }
 
-        Table_Iter cend(void) const {
-            Table_Iter iter = Table_Iter(_row_size, _data.cbegin(), &_columns_fields);
-            iter._row._begin._data = (types::U8*)_data.end().base();
+        auto end(void) const {
+            Table_Iter iter = Table_Iter(_row_size, _data.begin(), &_columns_fields);
+            iter._row._begin._data = _data.end();
             return iter;
         }
-        Table_Iter begin(void) const {
-            return cbegin();
+
+        auto cbegin(void) const {
+            return begin();
         }
 
-        Table_Iter end(void) const {
-            return cend();
+        auto cend(void) const {
+            return end();
         }
     };
 
