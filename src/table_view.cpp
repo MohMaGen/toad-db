@@ -2,22 +2,22 @@
 //#include <string>
 #include <table_view.hpp>
 
-
 namespace toad_db {
     std::ostream& operator<<(std::ostream& os, const Table_View<Table::Const_Iter>& view) {
         os << "Table View" << std::endl;
 
-        os << "|";
-        for (auto field: (*view.begin())) {
-            os << field.domain->domain_name << "|";
+        for (auto field = view.begin()->begin(); field != view.begin()->end(); field++) {
+            auto field_cp = field;
+            os << field->domain->domain_name
+                << (++field_cp != view.begin()->end() ? ";" : "");
         }
         os << std::endl;
 
         for (auto row: view) {
-            os << "|";
-
-            for (auto field: row) {
-                os << to_string(field) << "|";
+            for (auto field = row.begin(); field != row.end(); field++) {
+                auto field_cp = field;
+                os << to_string(*field)
+                    << (++field_cp != row.end() ? ";" : "");
             }
             os << std::endl;
         }
