@@ -1151,28 +1151,6 @@ namespace toad_db {
     };
 
 
-    /**
-     * 
-     * 	<Domain>::Expr [Expr_Type args] ==> { I32::add(10, 20); } => I32(20);
-     *
-     *  {
-     *      let a = 10;  -- I32::let("a", 10) => Basic_Type::void
-     *      a;  -- I32::get("a") => Domain::I32
-     * 		let b = a + 20; -- I32::let("b", I32::add(I32::get("a"), I32(20)))
-     *  }
-     **/
-    struct Expression {
-        struct Function {
-            enum Variant {
-                Defined, Basic
-            };
-            std::size_t domain_idx, function_idx;
-        };
-
-        Function fn;
-        std::vector<Expression> args;
-    };
-
 
     /**
      * Contains value of specific domain.
