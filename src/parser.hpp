@@ -31,23 +31,51 @@ namespace toad_db::parser {
             std::vector<Field> fields;
         };
 
+        struct Domain_Data {
+            std::string_view domain_name;
+            enum { Alias, Mul, Add } variant;
+
+            struct Field {
+                std::string_view name;
+                std::string_view domain;
+            };
+            std::vector<Field> fields;
+        };
+
         union {
             Table_Data table_data;
+            Domain_Data domain_data;
         };
 
         Top_Level_Statement() { }
+        Top_Level_Statement(const Top_Level_Statement& v): variant(v.variant) {
+            switch (v.variant) {
+            case Table_Define: std::construct_at(&table_data, v.table_data) ; break;
+            case Domain_Define:
+            case Function_Define:
+            case Call:
+            }
+        }
         Top_Level_Statement(const Top_Level_Statement&& v): variant(v.variant) {
             switch (v.variant) {
-            case Table_Define: table_data = std::move(v.table_data); break;
+            case Table_Define: std::construct_at(&table_data, v.table_data) ; break;
             case Domain_Define:
             case Function_Define:
             case Call:
             }
         }
 
-        Top_Level_Statement(const Table_Data &data): variant(Table_Define), table_data(data) { }
+        Top_Level_Statement(const Table_Data &data): variant(Table_Define) {
+            std::construct_at(&table_data, data);
+        }
 
         ~Top_Level_Statement() {
+            switch (variant) {
+            case Table_Define: table_data.~Table_Data(); break;
+            case Domain_Define:
+            case Function_Define:
+            case Call:
+            }
         }
     };
 
@@ -82,15 +110,80 @@ namespace toad_db::parser {
 
     class Expected_Table_Name: public Parsing_Exception {
         public:
-            Expected_Table_Name(): Parsing_Exception (
-                "Expected table name. Table define syntax is:\n"
+            Expected_Table_Name(const std::string &error_help): Parsing_Exception (
+                "Expected table name. Expected:\n"
+                "Table define syntax is:\n"
                 "\ttable Table_Name {\n"
                 "\t      ^^^^^^^^^^ -- there must be name.\n"
                 "\t\t ... fields,\n"
                 "\t};\n"
+                "But get:\n" + error_help
             ) {}
     };
 
+    class Expected_Char: public Parsing_Exception {
+        public:
+            Expected_Char(char c, const std::string& expected, const std::string& error_help):
+                Parsing_Exception(std::string("Expected `") + c +
+                    "`. Expected:\n" + expected +
+                    "But get:\n" + error_help
+                    ) {} 
+    };
+
+    class Expected_Feild_Name: public Parsing_Exception {
+        public:
+            Expected_Feild_Name(const std::string &error_help): Parsing_Exception (
+                "Expected field name. Expected:\n"
+                "Table define syntax is:\n"
+                "\ttable Table_Name {\n"
+                "\t\tfield_name(Type): query? query@ query!,\n"
+                "\t\t^^^^^^^^^^ -- there mut be name.\n"
+                "\t};\n"
+                "But get:\n" + error_help
+            ) {}
+    };
+
+    class Expected_Domain_Name: public Parsing_Exception {
+        public:
+            Expected_Domain_Name(const std::string &error_help): Parsing_Exception (
+                "Expected domain name. Expected:\n"
+                "Table define syntax is:\n"
+                "\ttable Table_Name {\n"
+                "\t\tfield_name(Type): some_validation_rule? some_display_rule@ some_gen_rule!,\n"
+                "\t\t           ^^^^ -- there mut be name.\n"
+                "\t};\n"
+                "But get:\n" + error_help
+            ) {}
+    };
+    class Expected_Rule_Name: public Parsing_Exception {
+        public:
+            Expected_Rule_Name(const std::string &error_help): Parsing_Exception (
+                "Expected rule name. Expected:\n"
+                "Table define syntax is:\n"
+                "\ttable Table_Name {\n"
+                "\t\tfield_name(Type): some_validation_rule? some_display_rule@ some_gen_rule!,\n"
+                "\t\t                  ^^^^^^^^^^^^^^^^^^^^^ -- there mut be name.\n"
+                "\t};\n"
+                "But get:\n" + error_help
+            ) {}
+    };
+
+
+    class Expected_Rule_Type: public Parsing_Exception {
+        public:
+            Expected_Rule_Type(const std::string &error_help): Parsing_Exception (
+                "Expected rule type. Expected:\n"
+                "Table define syntax is:\n"
+                "\ttable Table_Name {\n"
+                "\t\tfield_name(Type): some_validation_rule? some_display_rule@ some_gen_rule!,\n"
+                "\t\t                                      ^ -- There must be rule type:\n"
+                "\t\t                                          '!' -> for generation rule.\n"
+                "\t\t                                          '?' -> for validation rule.\n"
+                "\t\t                                          '@' -> for display rule.\n"
+                "\t};\n"
+                "But get:\n" + error_help
+            ) {}
+    };
 }
 
 #endif // parser_hpp_INCLUDED

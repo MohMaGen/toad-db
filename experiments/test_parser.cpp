@@ -17,7 +17,10 @@ int main() {
 
     std::cout << "Hello Values table: \n" << *parse(hello_table) << "\nEnd:\n" << std::endl;
 
-    try { parse_table("table { };"); }
+    try { parse_table("table {\n};"); }
+    catch (Parsing_Exception& e) { std::cout << "Failed: " << e.what() << std::endl; }
+
+    try { parse_table("table Table_Name [\n};"); }
     catch (Parsing_Exception& e) { std::cout << "Failed: " << e.what() << std::endl; }
 
     return 0;
