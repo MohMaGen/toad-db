@@ -16,7 +16,7 @@ namespace toad_db::parser {
 
     struct Top_Level_Statement {
         enum Variant {
-            Table_Define, Domain_Define, Function_Define, Call
+            Table_Define, Domain_Define, Function_Define, Call, None
         } variant;
 
         struct Table_Data {
@@ -33,7 +33,7 @@ namespace toad_db::parser {
 
         struct Domain_Data {
             std::string_view domain_name;
-            enum { Alias, Mul, Add } variant;
+            enum Variant { Alias, Mul, Add } variant;
 
             struct Field {
                 std::string_view name;
@@ -47,21 +47,23 @@ namespace toad_db::parser {
             Domain_Data domain_data;
         };
 
-        Top_Level_Statement() { }
+        Top_Level_Statement(): variant(None) { }
         Top_Level_Statement(const Top_Level_Statement& v): variant(v.variant) {
             switch (v.variant) {
-            case Table_Define: std::construct_at(&table_data, v.table_data) ; break;
-            case Domain_Define:
+            case Table_Define: std::construct_at(&table_data, v.table_data); break;
+            case Domain_Define: std::construct_at(&domain_data, v.domain_data); break; 
             case Function_Define:
             case Call:
+            case None:
             }
         }
         Top_Level_Statement(const Top_Level_Statement&& v): variant(v.variant) {
             switch (v.variant) {
-            case Table_Define: std::construct_at(&table_data, v.table_data) ; break;
-            case Domain_Define:
+            case Table_Define: std::construct_at(&table_data, v.table_data); break;
+            case Domain_Define: std::construct_at(&domain_data, v.domain_data); break; 
             case Function_Define:
             case Call:
+            case None:
             }
         }
 
@@ -69,12 +71,17 @@ namespace toad_db::parser {
             std::construct_at(&table_data, data);
         }
 
+        Top_Level_Statement(const Domain_Data &data): variant(Domain_Define) {
+            std::construct_at(&domain_data, data);
+        }
+
         ~Top_Level_Statement() {
             switch (variant) {
             case Table_Define: table_data.~Table_Data(); break;
-            case Domain_Define:
+            case Domain_Define: domain_data.~Domain_Data(); break;
             case Function_Define:
             case Call:
+            case None:
             }
         }
     };
@@ -143,9 +150,9 @@ namespace toad_db::parser {
             ) {}
     };
 
-    class Expected_Domain_Name: public Parsing_Exception {
+    class Expected_Table_Field_Domain_Name: public Parsing_Exception {
         public:
-            Expected_Domain_Name(const std::string &error_help): Parsing_Exception (
+            Expected_Table_Field_Domain_Name(const std::string &error_help): Parsing_Exception (
                 "Expected domain name. Expected:\n"
                 "Table define syntax is:\n"
                 "\ttable Table_Name {\n"
@@ -155,9 +162,9 @@ namespace toad_db::parser {
                 "But get:\n" + error_help
             ) {}
     };
-    class Expected_Rule_Name: public Parsing_Exception {
+    class Expected_Table_Field_Rule_Name: public Parsing_Exception {
         public:
-            Expected_Rule_Name(const std::string &error_help): Parsing_Exception (
+            Expected_Table_Field_Rule_Name(const std::string &error_help): Parsing_Exception (
                 "Expected rule name. Expected:\n"
                 "Table define syntax is:\n"
                 "\ttable Table_Name {\n"
@@ -169,9 +176,9 @@ namespace toad_db::parser {
     };
 
 
-    class Expected_Rule_Type: public Parsing_Exception {
+    class Expected_Table_Field_Rule_Type: public Parsing_Exception {
         public:
-            Expected_Rule_Type(const std::string &error_help): Parsing_Exception (
+            Expected_Table_Field_Rule_Type(const std::string &error_help): Parsing_Exception (
                 "Expected rule type. Expected:\n"
                 "Table define syntax is:\n"
                 "\ttable Table_Name {\n"
@@ -181,6 +188,38 @@ namespace toad_db::parser {
                 "\t\t                                          '?' -> for validation rule.\n"
                 "\t\t                                          '@' -> for display rule.\n"
                 "\t};\n"
+                "But get:\n" + error_help
+            ) {}
+    };
+
+    class Expected_Domain_Name: public Parsing_Exception {
+        public:
+            Expected_Domain_Name(const std::string& error_help): Parsing_Exception(
+                "Expected domain name. Expected:\n"
+                "Domain define syntax is:\n"
+                "\tdomain Domain_Name := ...domain_fields;\n"
+                "\t       ^^^^^^^^^^^ -- expected name there.\n"
+                "But get:\n" + error_help
+            )  {}
+    };
+
+    class Expected_Domain_Walrus_Operator: public Parsing_Exception {
+        public:
+            Expected_Domain_Walrus_Operator(const std::string& error_help): Parsing_Exception(
+                "Expected walrus operator. Expected:\n"
+                "Domain define syntax is:\n"
+                "\tdomain Domain_Name := ...domain_fields;\n"
+                "\t                   ^^ -- expected operator there.\n"
+                "But get:\n" + error_help
+            ) {} 
+    };
+
+    class Expect_Fields: public Parsing_Exception {
+        public:
+            Expect_Fields(const std::string& error_help): Parsing_Exception(
+                "Expected fields. Expected:\n"
+                "Domain define syntax is:\n"
+                "\tdomain Domain_Name := field(Domain)...;\n"
                 "But get:\n" + error_help
             ) {}
     };

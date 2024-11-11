@@ -23,5 +23,14 @@ int main() {
     try { parse_table("table Table_Name [\n};"); }
     catch (Parsing_Exception& e) { std::cout << "Failed: " << e.what() << std::endl; }
 
+    std::cout << "Hello Domain domain: \n" << *parse("domain Hello_domain := aaa;") << "\nEnd:\n" << std::endl;
+
+    std::cout << "Domains:\n" << *parse(
+            "domain Vector2 := x(F32) & y(F32);\n"
+            "domain Vector3 := x(F32) & y(F32) & z(F32);\n"
+            "domain Vector4 := x(F32) & y(F32) & z(F32) & w(F32);\n"
+            "domain Vector  := v2(Vector2) | v3(Vector3) | v4(Vector4);\n"
+        ) << "\nEnd:" << std::endl;
+
     return 0;
 }

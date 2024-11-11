@@ -22,7 +22,27 @@ namespace toad_db::parser {
                         }
                     }
                 } break;
-                case Top_Level_Statement::Domain_Define:
+                case Top_Level_Statement::Domain_Define: {
+                    os << "  (DOMAIN: `" << stmt.domain_data.domain_name << "`):\n";
+                    switch (stmt.domain_data.variant) {
+                    case Top_Level_Statement::Domain_Data::Alias: {
+                        os << "    (Domain: `" << stmt.domain_data.fields[0].name << "`).\n";
+                    } break;
+                    case Top_Level_Statement::Domain_Data::Mul: {
+                        for (auto &field: stmt.domain_data.fields) {
+                            os << "    (Mul Field: `" << field.name << "`):\n";
+                            os << "      (domain: `" << field.domain << "`).\n";
+                        }
+                    } break;
+                    case Top_Level_Statement::Domain_Data::Add: {
+                        for (auto &field: stmt.domain_data.fields) {
+                            os << "    (Add Field: `" << field.name << "`):\n";
+                            os << "      (domain: `" << field.domain << "`).\n";
+                        }
+                    } break;
+                    }
+
+                } break;
                 case Top_Level_Statement::Function_Define:
                 case Top_Level_Statement::Call:
                 default: {
@@ -76,6 +96,7 @@ namespace toad_db::parser {
         case Top_Level_Statement::Domain_Define: return "domain definition";
         case Top_Level_Statement::Function_Define: return "function definition";
         case Top_Level_Statement::Call: return "call statement";
+        case Top_Level_Statement::None: return "none";
         }
     }
 
@@ -163,7 +184,7 @@ namespace toad_db::parser {
             view = { view.begin() + 1, view.end() };
 
             auto domain_name = read_name(view); 
-            if (domain_name.size() == 0) throw Expected_Domain_Name(error_help(full_view, domain_name));
+            if (domain_name.size() == 0) throw Expected_Table_Field_Domain_Name(error_help(full_view, domain_name));
             field.type = domain_name;
             view = trim_left({ domain_name.end(), view.end() });
 
@@ -184,11 +205,11 @@ namespace toad_db::parser {
 
                 while (view.size() > 0 && view[0] != ',' && view[0] != '}') {
                     auto rule = read_name(view);
-                    if (rule.size() == 0) throw Expected_Rule_Name(error_help(full_view, rule));
+                    if (rule.size() == 0) throw Expected_Table_Field_Rule_Name(error_help(full_view, rule));
 
                     view = { rule.end(), view.end() };
                     if (view.size() == 0 || !is_rule_type(view[0])) {
-                        throw Expected_Rule_Type(error_help(full_view, {view.begin(), view.begin()}));
+                        throw Expected_Table_Field_Rule_Type(error_help(full_view, {view.begin(), view.begin()}));
                     }
                     field.rules.push_back({ rule.begin(), rule.end() + 1 });
                     view = trim_left({ view.begin() + 1, view.end() }); 
@@ -222,7 +243,82 @@ namespace toad_db::parser {
         view = trim_left(view);
         view = { view.begin() + std::string("domain").size(), view.end() };
 
-		return data;
+        auto domain_name = read_name(view); 
+        if (domain_name.size() == 0) {
+            throw Expected_Domain_Name(error_help(full_view, domain_name));
+        }
+        data.domain_name = domain_name;
+
+
+        view = trim_left({ domain_name.end(), view.end() });
+        if (view.size() <= 1 || !view.starts_with(":=")) {
+            throw Expected_Domain_Walrus_Operator(
+                error_help(full_view, { view.begin(), view.begin() }) );
+        }
+
+        view.remove_prefix(2); 
+        view = trim_left(view); 
+
+        using Variant = Top_Level_Statement::Domain_Data::Variant;
+        Variant curr_variant = Variant::Alias;
+        std::vector<Top_Level_Statement::Domain_Data::Field> fields { 0 };
+
+        while (view.size() == 0 || view[0] != ';') {
+            auto field = Top_Level_Statement::Domain_Data::Field { };
+
+            auto field_name = read_name(view);
+            if (field_name.size() == 0) {
+                throw Parsing_Exception("Expected domain name or field name");
+            }
+            field.name = field_name;
+            view = trim_left({ field_name.end(), view.end() });
+
+            if (view.size() > 0 && view[0] == '(') {
+                view = trim_left({ view.begin() + 1, view.end() });
+
+                auto domain_name = read_name(view);
+                if (domain_name.size() == 0) {
+                    throw Parsing_Exception("Expected domain name");
+                }
+                view = trim_left({ domain_name.end(), view.end() });
+
+                if (view.size() == 0 || view[0] != ')') {
+                    throw Parsing_Exception("Expected closing bracket!");
+                }
+
+                view = trim_left({ view.begin() + 1, view.end() });
+                field.domain = domain_name;
+            }
+
+            fields.push_back(field);
+
+            if (view.size() > 0 && view[0] == '|') {
+                if (curr_variant == Variant::Mul) {
+                    throw Parsing_Exception("Pipe operator in mul domain!");
+                }
+
+                curr_variant = Variant::Add;
+                view = trim_left({ view.begin() + 1, view.end() });
+            }
+
+            if (view.size() > 0 && view[0] == '&') {
+                if (curr_variant == Variant::Add) {
+                    throw Parsing_Exception("And operator in add domain!");
+                }
+
+                curr_variant = Variant::Mul;
+                view = trim_left({ view.begin() + 1, view.end() });
+            }
+        }
+
+        if (fields.size() == 0) {
+            throw Expect_Fields(error_help(full_view, {view.begin(), view.begin()}) );
+        }
+
+        data.fields = fields;
+        data.variant = curr_variant;
+
+        return data;
     }
 
 
@@ -244,13 +340,16 @@ namespace toad_db::parser {
             } break;
 
             case Top_Level_Statement::Domain_Define: {
-                tree->stmts.push_back(Top_Level_Statement { parse_table(stmt) });
+                tree->stmts.push_back(Top_Level_Statement { parse_domain(stmt) });
             } break;
 
             case Top_Level_Statement::Function_Define:
 
             case Top_Level_Statement::Call:
+
+            case Top_Level_Statement::None:
                 throw Parsing_Exception("Unimplemented statement type");
+
             }
 
             code = { stmt.end(), code.end() };
