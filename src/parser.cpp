@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <memory>
@@ -43,8 +44,12 @@ namespace toad_db::parser {
                     }
 
                 } break;
+                case Top_Level_Statement::Call: {
+                    os << "  (CALL):\n";
+                    os << "    (Expr: `" << to_string(stmt.call_data)  << "`)\n";
+                } break;
+
                 case Top_Level_Statement::Function_Define:
-                case Top_Level_Statement::Call:
                 default: {
                     os << "not implemented!" << std::endl;
                 }
@@ -52,6 +57,37 @@ namespace toad_db::parser {
             os << std::endl;
         }
         return os;
+    }
+    std::string to_string(Top_Level_Statement::Expression_Data::pointer ptr) {
+		using Kind = Top_Level_Statement::Expression_Data::kind;
+
+        if (ptr->kind == Kind::Expression) {
+            return "{" + (ptr->args.size() == 1 ? to_string(ptr->args[0]) : "" ) + "}";
+        }
+        auto prefix = [ptr] -> std::string {
+            switch (ptr->kind) {
+            case Kind::Num_Literal:
+            case Kind::Char_Literal:
+            case Kind::Str_Literal: return "L:";
+
+            case Kind::Name: return "N:";
+
+            case Kind::Operator: return "O:";
+
+            default: return "";
+            }
+        }();
+        std::string ret = "(" + prefix + std::string(ptr->name);
+
+        for (auto arg: ptr->args) {
+            ret += " " + to_string(arg);
+        }
+
+        return ret + ")";
+    }
+
+    std::string to_string(const Top_Level_Statement::Expression_Data &data) {
+        return to_string(data.root);
     }
 
     bool is_whitespace(char c) {
@@ -321,6 +357,219 @@ namespace toad_db::parser {
         return data;
     }
 
+    std::string_view read_before_closes(std::string_view view, char open, char close) {
+        size_t counter = 1, end = 0;
+
+        while (end < view.size() && counter != 0) {
+            if (view[end] == open) counter++;
+            if (view[end] == close) counter--;
+            end++;
+        }
+
+        if (counter > 0) throw Expected_Char(close, 
+            std::string("\t") + std::to_string(open) + " ... " + std::to_string(close) + "\n" +
+            "\t      ^ -- expected `" + std::to_string(close) + "`\n",
+            error_help(view, {view.end()-1, view.end()-1})
+            );
+
+        return { view.begin(), view.begin() + end };
+    }
+
+
+    std::pair<std::string_view, Top_Level_Statement::Expression_Data::kind>
+    read_literal(std::string_view view) {
+        using Kind = Top_Level_Statement::Expression_Data::kind;
+
+        view = trim_left(view);
+        if (view.size() > 0 && (view[0] == '"' || view[0] == '\'')) {
+            return { 
+                {view.begin(), read_until({view.begin()+1, view.end()}, view[0]).end()}, 
+                view[0] == '"' ? Kind::Str_Literal : Kind::Char_Literal }; 
+        }
+
+
+        if (view.size() > 0 && (view[0] == '+' || view[0] == '-' || std::isdigit(view[0]))) {
+            size_t end = 1;
+            while (end < view.size() && std::isdigit(view[end])) { end++; }
+
+            if (end == 1 && !std::isdigit(view[0])) {
+                return {{ view.begin(), view.begin()}, Kind::Err};
+            }
+            return {{ view.begin(), view.begin() + end}, Kind::Num_Literal };
+        }
+
+        return {{ view.begin(), view.begin() }, Kind::Err };
+    }
+
+    struct Operator {
+        std::string name;
+        size_t order;
+        enum Kind { Bynary=0, Prefix, Postfix } kind=Bynary;
+    };
+
+    static const std::vector<Operator> operators = {
+        { "==", 1 }, { "!=", 1 }, { "<=", 1 }, { ">=", 1 }, { ":=", 0 },
+        { "**", 5 },
+        { "+", 3 }, { "-", 3 }, { "*", 4 }, { "/", 4 }, { "^", 5 }, { "=", 0 },
+        { ">", 1}, { "<", 1 }, 
+    };
+
+    std::string_view read_operator(std::string_view view) {
+        view = trim_left(view);
+
+        auto op = std::find_if(operators.begin(), operators.end(), [&view] (auto &op)
+                               { return view.starts_with(op.name); });
+
+        if (op == operators.end()) {
+            return { view.begin(), view.begin() };
+        }
+
+        return { view.begin(), view.begin() + op->name.size() };
+    }
+
+    Operator get_operator(std::string_view view) {
+        view = trim_left(view);
+
+        auto op = std::find_if(operators.begin(), operators.end(), [&view] (auto &op)
+                               { return view == op.name; });
+
+        if (op == operators.end()) {
+            throw Parsing_Exception("Value: `" + std::string(view) + "` -- is not operator!");
+        }
+
+        return *op;
+    }
+
+    bool operator_expect_args(std::string_view view, size_t args) {
+
+        switch (get_operator(view).kind) {
+        case Operator::Bynary: return args < 2;
+        case Operator::Prefix:
+        case Operator::Postfix: return args < 1;
+        }
+    }
+
+    struct Bound_Operator {
+        enum Variant {
+            Once, Multiple, None_Or_Multiple, Close
+        };
+        struct Node {
+            std::string name;
+            Variant variant;
+        };
+        std::vector<Node> nodes;
+    };
+
+	/*
+    static const std::vector<Bound_Operator> bound_operators = {
+        {{"if", Bound_Operator::Once}, {"then", Bound_Operator::Once}, {"else", Bound_Operator::Once}},
+        {{"[", Bound_Operator::Once}, {",", Bound_Operator::None_Or_Multiple}, {"]", Bound_Operator::Close}},
+        {{"let", Bound_Operator::Once}, {"in", Bound_Operator::Once}},
+    };
+
+    std::vector<std::string_view> read_bound_operator(std::string_view view) {
+        view = trim_left(view);
+        auto op = std::find_if(bound_operators.begin(), bound_operators.end(),
+                               [view](auto bop){ return view.starts_with(bop.nodes[0].name); });
+
+        if (op == bound_operators.end()) return { };
+
+    }
+    */
+
+    Top_Level_Statement::Expression_Data parse_call(std::string_view view) {
+        using Expression_Data = Top_Level_Statement::Expression_Data;
+        std::string_view full_view = view;
+
+        std::vector<Expression_Data::pointer> stack;
+        Expression_Data::pointer curr;
+        Expression_Data root {};
+
+        const auto push_node = [&root, &curr](auto node) -> void {
+            if (root.root->args.size() == 0) {
+                root.root->args.push_back(node);
+                curr = node;
+                return;
+            }
+            if (node->kind != Expression_Data::kind::Operator) {
+                curr->args.push_back(node);
+                return;
+            }
+
+            auto prev = root.root;
+            curr = root.root->args[0];
+            while (curr->kind == Expression_Data::kind::Operator
+                   && get_operator(curr->name).order < get_operator(node->name).order) {
+
+                if (curr->args.size() == 0) {
+                    prev = curr;
+                    curr = NULL;
+                }
+
+                prev = curr;
+                curr = *curr->args.rbegin();
+            }
+
+            if (curr == NULL) {
+                prev->args.push_back(node);
+            } else {
+                *prev->args.rbegin() = node;
+                node->args.push_back(curr);
+            }
+            curr = node;
+        };
+
+        while (view.size() > 0 && view[0] != ';') {
+            view = trim_left(view); 
+
+            if (view.size() > 0 && view[0] == ')') {
+                view.remove_prefix(1); 
+                continue;
+            }
+
+            if (view.size() > 0 && view[0] == '(') {
+                auto sub_expression_view = read_before_closes({view.begin()+1, view.end()}, '(', ')'); 
+                auto sub_expression = parse_call(sub_expression_view);
+
+                push_node( sub_expression.root );
+                view = { sub_expression_view.end(), view.end() };
+                continue;
+            }
+
+            auto [literal, kind] = read_literal(view);
+            if (kind != Expression_Data::kind::Err) {
+                push_node( Expression_Data::make_pointer(kind, literal) );
+                view = { literal.end(), view.end() };
+                continue;
+            }
+
+            auto op = read_operator(view);
+            if (op.size() > 0) {
+                push_node( Expression_Data::make_pointer(Expression_Data::kind::Operator, op) );
+                view = { op.end(), view.end() };
+                continue;
+            }
+
+            auto name = read_name(view);
+            if (name.size() > 0) {
+                push_node( Expression_Data::make_pointer(Expression_Data::kind::Name, name) );
+                view = { name.end(), view.end() };
+                continue;
+            }
+
+            view = trim_left(view); 
+            if (view.size() != 0 && view[0] != ';')
+                throw Unexpected_Call(error_help(full_view, { view.begin(), view.begin() })); 
+        }
+
+        return { root };
+    }
+
+    // aboba don + lol * biba
+    // [aboba]; [aboba don]; [aboba (+ don ?)]; [aboba (+ don lol)]; [aboba (+ don (* lol ?))];
+    // [aboba (+ don (* lol biba))]; (aboba (+ don (* lol biba)))
+    // (aboba don) + lol * biba
+    // [[aboba]]; [[aboba don]]; [(aboba don)]; [(+ (aboba don))];
 
 
     std::unique_ptr<Syntax_Tree> parse(const std::string &source) {
@@ -343,9 +592,12 @@ namespace toad_db::parser {
                 tree->stmts.push_back(Top_Level_Statement { parse_domain(stmt) });
             } break;
 
+            case Top_Level_Statement::Call: {
+                tree->stmts.push_back(Top_Level_Statement { parse_call(stmt) });
+            } break;
+
             case Top_Level_Statement::Function_Define:
 
-            case Top_Level_Statement::Call:
 
             case Top_Level_Statement::None:
                 throw Parsing_Exception("Unimplemented statement type");

@@ -42,9 +42,56 @@ namespace toad_db::parser {
             std::vector<Field> fields;
         };
 
+        struct Expression_Data {
+            struct Expression_Node {
+                using pointer = std::shared_ptr<Expression_Node>; 
+
+
+                enum Kind { Str_Literal, Char_Literal, Num_Literal, Name, Operator, Expression, Err } kind;
+                std::string_view name;
+                std::vector<pointer> args;
+
+                Expression_Node(Kind kind, std::string_view name):
+                    kind(kind), name(name), args({}) {}
+
+                Expression_Node(Kind kind, std::string_view name, std::vector<pointer> args):
+                    kind(kind), name(name), args(args) {}
+            };
+            using kind = Expression_Node::Kind;
+            using pointer = Expression_Node::pointer;
+
+            template<typename... _Args>
+            static pointer make_pointer(_Args... args) {
+                return std::make_shared<Expression_Node>(Expression_Node(args...));
+            }
+
+            static pointer most_right(pointer node) {
+                if (node->args.size() == 0) return node;
+                return most_right(*node->args.rbegin());
+            }
+
+            pointer root; 
+
+            Expression_Data() {
+                root = make_pointer(
+                    kind::Expression, 
+                    std::string_view { }
+                );
+            }
+
+            Expression_Data(pointer ptr) {
+                root = make_pointer(
+                    kind::Expression, 
+                    std::string_view{ ptr->name.begin(), ptr->name.begin() },
+                    std::vector{ ptr }
+                );
+            }
+        };
+
         union {
             Table_Data table_data;
             Domain_Data domain_data;
+            Expression_Data call_data;
         };
 
         Top_Level_Statement(): variant(None) { }
@@ -53,16 +100,16 @@ namespace toad_db::parser {
             case Table_Define: std::construct_at(&table_data, v.table_data); break;
             case Domain_Define: std::construct_at(&domain_data, v.domain_data); break; 
             case Function_Define:
-            case Call:
+            case Call: std::construct_at(&call_data, v.call_data); break; 
             case None:
             }
         }
         Top_Level_Statement(const Top_Level_Statement&& v): variant(v.variant) {
             switch (v.variant) {
-            case Table_Define: std::construct_at(&table_data, v.table_data); break;
-            case Domain_Define: std::construct_at(&domain_data, v.domain_data); break; 
+            case Table_Define: std::construct_at(&table_data, std::move(v.table_data)); break;
+            case Domain_Define: std::construct_at(&domain_data, std::move(v.domain_data)); break; 
             case Function_Define:
-            case Call:
+            case Call: std::construct_at(&call_data, std::move(v.call_data)); break;
             case None:
             }
         }
@@ -75,18 +122,23 @@ namespace toad_db::parser {
             std::construct_at(&domain_data, data);
         }
 
+        Top_Level_Statement(const Expression_Data &data): variant(Call) {
+            std::construct_at(&call_data, data);
+        }
+
         ~Top_Level_Statement() {
             switch (variant) {
             case Table_Define: table_data.~Table_Data(); break;
             case Domain_Define: domain_data.~Domain_Data(); break;
             case Function_Define:
-            case Call:
+            case Call: call_data.~Expression_Data(); break;
             case None:
             }
         }
     };
 
     std::string to_string(Top_Level_Statement::Variant);
+    std::string to_string(const Top_Level_Statement::Expression_Data& data);
 
     struct Syntax_Tree {
         std::string content;
@@ -222,6 +274,30 @@ namespace toad_db::parser {
                 "\tdomain Domain_Name := field(Domain)...;\n"
                 "But get:\n" + error_help
             ) {}
+    };
+
+
+    class Expected_Left_Operand: public Parsing_Exception {
+        public:
+            Expected_Left_Operand(std::string op, std::string error_help): Parsing_Exception(
+                "Expect left operand of operator `" + op + "`.\n"
+                "Get:\n" + error_help
+            ) {  }
+    };
+
+    class Expected_Right_Operand: public Parsing_Exception {
+        public:
+            Expected_Right_Operand(std::string op, std::string error_help): Parsing_Exception(
+                "Expect right operand of operator `" + op + "`.\n"
+                "Get:\n" + error_help
+            ) {  }
+    };
+
+    class Unexpected_Call: public Parsing_Exception {
+        public:
+            Unexpected_Call(std::string error_help): Parsing_Exception(
+                "Unexpected chars in function:\n" + error_help
+            ) {} 
     };
 }
 

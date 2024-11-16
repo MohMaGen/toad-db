@@ -32,5 +32,19 @@ int main() {
             "domain Vector  := v2(Vector2) | v3(Vector3) | v4(Vector4);\n"
         ) << "\nEnd:" << std::endl;
 
+    std::cout << "Call:\n" << *parse(
+            "display (a + b);\n"
+            "a + b + c * g;\n"
+            "aboba := a + b;\n"
+            "aboba := a + b;\n"
+            ";\n"
+            "a + b + c * g ** e + d;\n"
+            "a + b + (c * g) ** e + d;\n"
+            "(sum array) / (length array) + 10;\n"
+            "ret := a >= c;\n" 
+            "index Table1 \"row1\";\n"
+            "display (filter (column \"name\") (view Table1)) \"wide\"  ;\n"
+        ) << "\nEnd:" << std::endl;
+
     return 0;
 }
