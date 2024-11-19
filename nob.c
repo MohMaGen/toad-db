@@ -12,6 +12,16 @@ bool strendswith(const char* str, const char* suf) {
     return strcmp(str + str_len - suf_len, suf) == 0; 
 }
 
+bool strstartswith(const char *str, const char* pref) {
+    size_t str_len = strlen(str), pref_len = strlen(pref);
+    if (str_len < pref_len) return false;
+
+    for (size_t i = 0; i < pref_len; i++)
+        if (str[i] != pref[i]) return false;
+
+    return true;
+}
+
 #define SOURCE_DIR "src"
 #define BUILD_DIR "build"
 #define EXPERIMENT_DIR "experiments"
@@ -140,7 +150,7 @@ bool build_experiments(Nob_Cmd *cmd) {
         nob_da_append(&procs, proc);
     }
 
-    nob_procs_wait(procs); 
+    if (!nob_procs_wait(procs)) return false; 
 
     return true;
 }
@@ -178,9 +188,38 @@ int main(int argc, char **argv) {
         nob_da_free(deps);
     }
 
-    nob_procs_wait(procs);
+    if (!nob_procs_wait(procs)) nob_return_defer(1);
 
     if (!build_experiments(&cmd)) nob_return_defer(1); 
+
+    if (argc > 1) {
+        if (strcmp(argv[1], "run") == 0) {
+            if (argc < 3) {
+                nob_log(NOB_ERROR, "Expected target name to run!");
+                nob_return_defer(1); 
+            }
+
+            for (size_t i = 0; i < experiments_bins.count; i++) {
+                if (strstartswith(experiments_bins.items[i],
+                                  nob_temp_sprintf("%s/%s", BUILD_DIR, argv[2]))) {
+
+                    nob_log(NOB_INFO, "Run: `%s`.", experiments_bins.items[i]);
+                    nob_cmd_append(&cmd, experiments_bins.items[i]);
+                    if (!nob_cmd_run_sync_and_reset(&cmd)) nob_return_defer(1);
+                }
+            }
+        }
+        if (strcmp(argv[1], "list") == 0) {
+            nob_log(NOB_INFO, "");
+            nob_log(NOB_INFO, "");
+            nob_log(NOB_INFO, "");
+            nob_log(NOB_INFO, "  ---===< LIST TARGETS >===---");
+            nob_log(NOB_INFO, "");
+            for (size_t i = 0; i < experiments_bins.count; i++) {
+                nob_log(NOB_INFO, "   < target > `%s`", experiments_bins.items[i] + strlen(BUILD_DIR) + 1);
+            }
+        }
+    }
 
 defer:
     nob_da_free(sources);
