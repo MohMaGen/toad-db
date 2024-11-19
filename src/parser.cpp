@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <ostream>
@@ -77,7 +78,7 @@ namespace toad_db::parser {
             default: return "";
             }
         }();
-        std::string ret = "(" + prefix + std::string(ptr->name);
+        std::string ret = "(" + prefix + "'" + std::string(ptr->name) + "'";
 
         for (auto arg: ptr->args) {
             ret += " " + to_string(arg);
@@ -408,8 +409,10 @@ namespace toad_db::parser {
     };
 
     static const std::vector<Operator> operators = {
+        { "with", 5 },
         { "==", 1 }, { "!=", 1 }, { "<=", 1 }, { ">=", 1 }, { ":=", 0 },
-        { "**", 5 },
+        { "**", 5 }, { "as", 5 },
+        { "@", 6 },
         { "+", 3 }, { "-", 3 }, { "*", 4 }, { "/", 4 }, { "^", 5 }, { "=", 0 },
         { ">", 1}, { "<", 1 }, 
     };
@@ -451,7 +454,7 @@ namespace toad_db::parser {
 
     struct Bound_Operator {
         enum Variant {
-            Once, Multiple, None_Or_Multiple, Close
+            Once, Multiple, Close
         };
         struct Node {
             std::string name;
@@ -460,22 +463,89 @@ namespace toad_db::parser {
         std::vector<Node> nodes;
     };
 
-	/*
+
     static const std::vector<Bound_Operator> bound_operators = {
-        {{"if", Bound_Operator::Once}, {"then", Bound_Operator::Once}, {"else", Bound_Operator::Once}},
-        {{"[", Bound_Operator::Once}, {",", Bound_Operator::None_Or_Multiple}, {"]", Bound_Operator::Close}},
-        {{"let", Bound_Operator::Once}, {"in", Bound_Operator::Once}},
+        {{{"if", Bound_Operator::Once}, {"then", Bound_Operator::Once}, {"else", Bound_Operator::Once}}},
+        {{{"let", Bound_Operator::Once}, {"in", Bound_Operator::Once}}},
+        {{{"[", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {"]", Bound_Operator::Close}}},
+        {{{"(", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {")", Bound_Operator::Close}}},
+        {{{"<", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {">", Bound_Operator::Close}}},
+        {{{"{", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {"}", Bound_Operator::Close}}},
     };
+    // [( | , | ; | )]
+    // [( a, b, c, d; a; d; c )]
+
+    std::string_view read_until(std::string_view view, std::function<bool (std::string_view)> pred) {
+        std::string_view ret = view;
+
+        while (view.begin() != view.end() && !pred(view)) view.remove_prefix(1);
+
+        return trim_left({ ret.begin(), view.begin() });
+    }
+
+    std::string_view read_node(std::string_view view, const Bound_Operator &op, size_t &idx) {
+        int level = 0;
+        auto start = view.begin();
+
+        while (view.begin() < view.end()) {
+            if (level == 0) {
+                size_t prev = idx;
+
+                while (++idx < op.nodes.size()) {
+                    if (view.starts_with(op.nodes[idx].name)) {
+                        if (op.nodes[idx].variant == Bound_Operator::Variant::Multiple) idx--;
+                        return { start, view.begin() };
+                    }
+
+                    if (op.nodes[idx].variant != Bound_Operator::Variant::Multiple) break;
+                }
+
+                idx = prev;
+            }
+
+            if (view.starts_with(op.nodes.begin()->name)) level++;
+            if (view.starts_with(op.nodes.rbegin()->name)) level--;
+
+            view = { view.begin()+1, view.end() };
+        }
+
+        if (level != 0) return { view.begin(), view.begin() };
+        idx++;
+
+        return { start, view.begin() };
+    }
 
     std::vector<std::string_view> read_bound_operator(std::string_view view) {
+        auto full_view = view;
         view = trim_left(view);
         auto op = std::find_if(bound_operators.begin(), bound_operators.end(),
-                               [view](auto bop){ return view.starts_with(bop.nodes[0].name); });
+                               [view](auto op){ return view.starts_with(op.nodes[0].name); });
 
         if (op == bound_operators.end()) return { };
 
+        std::vector<std::string_view> ret { };
+
+        size_t i = 0;
+        while (i < op->nodes.size()) {
+            auto node = op->nodes[i];
+            ret.push_back({ view.begin(), view.begin() + node.name.size() });
+            view = { view.begin() + node.name.size(), view.end() };
+
+            if (op->nodes[i].variant == Bound_Operator::Close) break;
+
+            auto expr = read_node(view, *op, i);
+
+            if (op->nodes[i].variant == Bound_Operator::Once && expr.size() == 0) {
+                throw Expected_Bound_Operator_Node_Expr(op->nodes[i].name, error_help(full_view, expr));
+            }
+
+            view = { expr.end(), view.end() };
+
+            ret.push_back(expr);
+        }
+
+        return ret;
     }
-    */
 
     Top_Level_Statement::Expression_Data parse_call(std::string_view view) {
         using Expression_Data = Top_Level_Statement::Expression_Data;
@@ -504,6 +574,7 @@ namespace toad_db::parser {
                 if (curr->args.size() == 0) {
                     prev = curr;
                     curr = NULL;
+                    break;
                 }
 
                 prev = curr;
@@ -519,20 +590,49 @@ namespace toad_db::parser {
             curr = node;
         };
 
+
         while (view.size() > 0 && view[0] != ';') {
             view = trim_left(view); 
 
-            if (view.size() > 0 && view[0] == ')') {
+            /*if (view.size() > 0 && view[0] == ')') {
                 view.remove_prefix(1); 
                 continue;
             }
-
             if (view.size() > 0 && view[0] == '(') {
                 auto sub_expression_view = read_before_closes({view.begin()+1, view.end()}, '(', ')'); 
                 auto sub_expression = parse_call(sub_expression_view);
 
                 push_node( sub_expression.root );
                 view = { sub_expression_view.end(), view.end() };
+                continue;
+            }*/
+
+            auto bop_views = read_bound_operator(view);
+            if (bop_views.size() > 0) {
+                auto node = Expression_Data::make_pointer(
+                    Expression_Data::kind::Bound_Operator, 
+                    bop_views[0]
+                );
+                view = { bop_views[0].end(), view.end() };
+
+
+                bool is_expr = true;
+                for (auto expr : std::span(bop_views.begin()+1, bop_views.size()-1)) {
+                    if (is_expr) {
+                        node->args.push_back( parse_call(expr).root  );
+                    } else {
+                        node->args.push_back(Expression_Data::make_pointer(
+                            Expression_Data::kind::Name,
+                            expr
+                        ));
+                    }
+					is_expr = !is_expr;
+                    view = { expr.end(), view.end() };
+                }
+
+
+                push_node(node); 
+                view = trim_left(view);
                 continue;
             }
 
@@ -542,6 +642,7 @@ namespace toad_db::parser {
                 view = { literal.end(), view.end() };
                 continue;
             }
+
 
             auto op = read_operator(view);
             if (op.size() > 0) {
@@ -564,13 +665,6 @@ namespace toad_db::parser {
 
         return { root };
     }
-
-    // aboba don + lol * biba
-    // [aboba]; [aboba don]; [aboba (+ don ?)]; [aboba (+ don lol)]; [aboba (+ don (* lol ?))];
-    // [aboba (+ don (* lol biba))]; (aboba (+ don (* lol biba)))
-    // (aboba don) + lol * biba
-    // [[aboba]]; [[aboba don]]; [(aboba don)]; [(+ (aboba don))];
-
 
     std::unique_ptr<Syntax_Tree> parse(const std::string &source) {
         auto tree = std::make_unique<Syntax_Tree>(Syntax_Tree {});

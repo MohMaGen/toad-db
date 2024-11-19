@@ -47,7 +47,13 @@ namespace toad_db::parser {
                 using pointer = std::shared_ptr<Expression_Node>; 
 
 
-                enum Kind { Str_Literal, Char_Literal, Num_Literal, Name, Operator, Expression, Err } kind;
+                enum Kind {
+                    Name = 0,
+                    Str_Literal, Char_Literal, Num_Literal,
+                    Operator, Bound_Operator,
+                    Expression,
+                    Err,
+                } kind;
                 std::string_view name;
                 std::vector<pointer> args;
 
@@ -298,6 +304,15 @@ namespace toad_db::parser {
             Unexpected_Call(std::string error_help): Parsing_Exception(
                 "Unexpected chars in function:\n" + error_help
             ) {} 
+    };
+
+
+    class Expected_Bound_Operator_Node_Expr: public Parsing_Exception {
+        public:
+            Expected_Bound_Operator_Node_Expr(std::string node_name, std::string help_error): Parsing_Exception(
+                "Expected expression of right hand of operator node `" + node_name + "`;\n"
+                "But get:\n" + help_error
+            ) {}
     };
 }
 
