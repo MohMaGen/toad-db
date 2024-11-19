@@ -15,17 +15,11 @@ int main() {
     std::cout << "stmt: `" << read_stmt(hello_table + ";") << "`." << std::endl; 
     std::cout << "stmt: `" << read_stmt("        \n\t\t\n     " + hello_table + ";\nasfd") << "`." << std::endl; 
 
-    std::cout << "Hello Values table: \n" << *parse(hello_table) << "\nEnd:\n" << std::endl;
+    std::cout << "Hello Values table: \n" << *Syntax_Tree::parse(hello_table) << "\nEnd:\n" << std::endl;
 
-    try { parse_table("table {\n};"); }
-    catch (Parsing_Exception& e) { std::cout << "Failed: " << e.what() << std::endl; }
+    std::cout << "Hello Domain domain: \n" << *Syntax_Tree::parse("domain Hello_domain := aaa;") << "\nEnd:\n" << std::endl;
 
-    try { parse_table("table Table_Name [\n};"); }
-    catch (Parsing_Exception& e) { std::cout << "Failed: " << e.what() << std::endl; }
-
-    std::cout << "Hello Domain domain: \n" << *parse("domain Hello_domain := aaa;") << "\nEnd:\n" << std::endl;
-
-    std::cout << "Domains:\n" << *parse(
+    std::cout << "Domains:\n" << *Syntax_Tree::parse(
             "domain Vector2 := x(F32) & y(F32);\n"
             "domain Vector3 := x(F32) & y(F32) & z(F32);\n"
             "domain Vector4 := x(F32) & y(F32) & z(F32) & w(F32);\n"
@@ -33,7 +27,7 @@ int main() {
         ) << "\nEnd:" << std::endl;
 
 
-    std::cout << "Call:\n" << *parse(
+    std::cout << "Call:\n" << *Syntax_Tree::parse(
             "(a + b);\n"
 
             "let a = 10 in a + b;\n"
@@ -53,7 +47,7 @@ int main() {
 
         ) << "\nEnd:" << std::endl;
 
-    std::cout << "Call:\n" << *parse(
+    std::cout << "Call:\n" << *Syntax_Tree::parse(
             "display (a + b);\n"
             "a + b + c * g;\n"
             "aboba := a + b;\n"
@@ -69,7 +63,7 @@ int main() {
             "if a == b then 10 else 20;\n"
         ) << "\nEnd:" << std::endl;
 
-    std::cout << "Call:\n" << *parse(
+    std::cout << "Call:\n" << *Syntax_Tree::parse(
             "[a, b, c];\n"
             "[[1 + 2, 2 + 3], [3 + 4, 4 + 5]];\n"
             "let view_1 = Table1 with (name as name_1, age as age_1, tb2_id) in\n"

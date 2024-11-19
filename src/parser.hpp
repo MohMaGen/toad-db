@@ -14,70 +14,284 @@
  **/
 namespace toad_db::parser {
 
+    /**
+     * # The Top_Level_Statement
+     *
+     * Class that in fact tagged union of different possible
+     * top level statements. [ Table Definition, Function Definition, Function Call ]
+     *
+     * The top level statements do not owns names
+     * and literals. So you must strore original
+     * string somewhere.
+     */
     struct Top_Level_Statement {
+        /**
+         * Variant for tagged union.
+         */
         enum Variant {
-            Table_Define, Domain_Define, Function_Define, Call, None
+            /**
+             * # Table definition.
+             * 
+             * The syntax:
+             * 
+             *    table <Table_Name> {
+             *        field_name(Field_Domain): @display_rule,
+             *        field_name2(Field_Domain2): @display_rule ?check_rule,
+             *    };
+             *
+             * Example:
+             *    table Person_Data {
+             *         id(Key),
+             *         name(Str): ?not_null ?unique,
+             *         age(I8),
+             *    };
+             */
+            Table_Define = 0, 
+
+            /**
+             * # Domain definition.
+             * 
+             * New domains can be one of three
+             * types:  Alias, Mul, and Add.
+             * The example:
+             *    domain Alias_Domain := I32;
+             * 
+             *    domain Vector2 := x(F32) & y(F32);
+             *    domain Vector3 := x(F32) & y(F32) & z(F32);
+             *    domain Vector4 := x(F32) & y(F32) & z(F32) & w(F32);
+             * 
+             *    domain Vector  := v2(Vector2) | v3(Vector3) | v4(Vector4); 
+             */
+            Domain_Define,
+
+            /**
+             * # Function Definition.
+             *
+             * Function can be just top level global function. That
+             * can be called like (function_name args...) --- than
+             * define syntax would be following:
+             *
+             *    function function_name ( Type args,... ) -> Type
+             *        body...;
+             *
+             * > info
+             * > function arguments can be not only domains, but also
+             * > of other types (like refs and function pointers).
+             *
+             * Also functions can be rules. Rule are assosiated with
+             * domains and can be of different types.
+             */
+            Function_Define,
+
+
+            /**
+             * # Top level expression.
+             * Example:
+             *    let person_view = Person_Data with (name, age) in
+             *    display person_view;
+             */
+            Call,
+
+            /**
+             * For type save error handling.
+             * :)
+             */
+            None
         } variant;
 
+        /**
+         * # Table_Data.
+         */
         struct Table_Data {
+            /**
+             * Name of the table.
+             */
             std::string_view table_name;
 
             struct Field {
+                /* The name of the field */
                 std::string_view name;
+
+                /* The domain fo the field */
                 std::string_view type;
 
+                /* vector of field's rules. */
                 std::vector<std::string_view> rules; 
             };
+            /*
+             * Table's fields.
+             */
             std::vector<Field> fields;
         };
 
+        /**
+         * # Domain_Data
+         *
+         * Domain's definitions can be one of thre
+         * kinds: Alias, Mul, and Add. This kinds
+         * represented in Domain_Data::Variant enumeration.
+         */
         struct Domain_Data {
+            /**
+             * Name of the domain.
+             * 
+             * It's suggested to use domain names
+             * in combined camal Pascal case. like this:
+             * `Domain_Name` or `My_Domain`.
+             */
             std::string_view domain_name;
-            enum Variant { Alias, Mul, Add } variant;
+
+            enum Variant {
+                /**
+                 * Alias domain.
+                 * Can be only for basic types.
+                 * example:
+                 *     domain Key := U64;
+                 */
+                Alias,
+
+                /**
+                 * Multiplication domain.
+                 * Fields must have names.
+                 *
+                 * example:
+                 *     domain Vec2 := x(F32) & x(F32);
+                 */
+                Mul,
+
+                /**
+                 * Addition domain.
+                 * Some fields may not have domain names.
+                 * example:
+                 *     domain Shape := none | cirle(Circle) | square(Square);
+                 */
+                Add
+            } variant;
 
             struct Field {
+                /* Name of domains fields */
                 std::string_view name;
+                /* Name of domain fo the field */
                 std::string_view domain;
             };
+            /**
+             * Fields. In case of Alias domain.
+             * Fields will consist only of one field
+             * with empty `.domain` adn with `.name`
+             * equals to actual domain of this alias.
+             */
             std::vector<Field> fields;
         };
 
+        /**
+         * # Expression_Data
+         * data of expression.
+         *
+         * This is tree of function and applyed arguments.
+         * .root = (func arg1 arg2 arg3)
+         */
         struct Expression_Data {
+
+            /**
+             * Node value.
+             */
             struct Expression_Node {
+                /**
+                 * pointer to the node.
+                 */
                 using pointer = std::shared_ptr<Expression_Node>; 
 
 
+                /**
+                 * Kind of the node.
+                 */
                 enum Kind {
+                    /**
+                     * Can be both: name of the function or
+                     * name of the variable.
+                     */
                     Name = 0,
+
+                    /**
+                     * Literals (Str_Literal, Char_Literal, Num_Literal)
+                     * used to reprsent literals like: 12312 '123123' "23123"
+                     */
                     Str_Literal, Char_Literal, Num_Literal,
+
+                    /**
+                     * Operators.
+                     */
                     Operator, Bound_Operator,
+
+                    /**
+                     * Kind of node that just only one argument and have no names.
+                     * It's basicly the wrapper. Equvalent to (expr).
+                     */
                     Expression,
+
+                    /**
+                     * For error handling.
+                     */
                     Err,
                 } kind;
+
+                /**
+                 * Name of the called function or operator.
+                 *
+                 * In case of .kind = Expression will just empty.
+                 * It's not guarateed that this empty view will
+                 * be at original string.
+                 */
                 std::string_view name;
+
+                /**
+                 * The args applyed to the function or operator [to the name].
+                 */
                 std::vector<pointer> args;
 
+                /**
+                 * Build node with no arguments.
+                 */
                 Expression_Node(Kind kind, std::string_view name):
                     kind(kind), name(name), args({}) {}
 
+                /**
+                 * Build node with provided arguments.
+                 */
                 Expression_Node(Kind kind, std::string_view name, std::vector<pointer> args):
                     kind(kind), name(name), args(args) {}
             };
+
+            /* Node kind using. */
             using kind = Expression_Node::Kind;
+
+            /* Node's pointer using. */
             using pointer = Expression_Node::pointer;
 
+            /**
+             * Node's pointer constructor.
+             */
             template<typename... _Args>
             static pointer make_pointer(_Args... args) {
                 return std::make_shared<Expression_Node>(Expression_Node(args...));
             }
 
+
+			/*
             static pointer most_right(pointer node) {
                 if (node->args.size() == 0) return node;
                 return most_right(*node->args.rbegin());
             }
+            */
 
+            /**
+             * The root of expression tree.
+             */
             pointer root; 
 
+            /**
+             * Construct empty expression tree.
+             */
             Expression_Data() {
                 root = make_pointer(
                     kind::Expression, 
@@ -85,6 +299,9 @@ namespace toad_db::parser {
                 );
             }
 
+            /**
+             * Construct expression tree from root element.
+             */
             Expression_Data(pointer ptr) {
                 root = make_pointer(
                     kind::Expression, 
@@ -94,13 +311,24 @@ namespace toad_db::parser {
             }
         };
 
+        /**
+         * Union part of tagged union.
+         * Which of variants is used defined by .variant.
+         */
         union {
             Table_Data table_data;
             Domain_Data domain_data;
             Expression_Data call_data;
         };
 
+        /**
+         * Default statement with None variant.
+         */
         Top_Level_Statement(): variant(None) { }
+
+        /**
+         * Copy constructor.
+         */
         Top_Level_Statement(const Top_Level_Statement& v): variant(v.variant) {
             switch (v.variant) {
             case Table_Define: std::construct_at(&table_data, v.table_data); break;
@@ -110,6 +338,10 @@ namespace toad_db::parser {
             case None:
             }
         }
+
+        /**
+         * Move constructor.
+         */
         Top_Level_Statement(const Top_Level_Statement&& v): variant(v.variant) {
             switch (v.variant) {
             case Table_Define: std::construct_at(&table_data, std::move(v.table_data)); break;
@@ -120,18 +352,30 @@ namespace toad_db::parser {
             }
         }
 
+        /**
+         * Construct statement from Table_Data [would be Table_Define variant].
+         */
         Top_Level_Statement(const Table_Data &data): variant(Table_Define) {
             std::construct_at(&table_data, data);
         }
 
+        /**
+         * Construct statement from Domain_Data [would be Domain_Define variant].
+         */
         Top_Level_Statement(const Domain_Data &data): variant(Domain_Define) {
             std::construct_at(&domain_data, data);
         }
 
+        /**
+         * Construct statement from Expression_Data [would be Call variant].
+         */
         Top_Level_Statement(const Expression_Data &data): variant(Call) {
             std::construct_at(&call_data, data);
         }
 
+        /**
+         * Destructor
+         */
         ~Top_Level_Statement() {
             switch (variant) {
             case Table_Define: table_data.~Table_Data(); break;
@@ -149,10 +393,67 @@ namespace toad_db::parser {
     struct Syntax_Tree {
         std::string content;
         std::vector<Top_Level_Statement> stmts;
-    };
-    std::ostream& operator<<(std::ostream& os, const Syntax_Tree& tree);
 
-    std::unique_ptr<Syntax_Tree> parse(const std::string &source);
+        struct Operator {
+            std::string name;
+            size_t order;
+        };
+
+        std::vector<Operator> operators = {
+            { "with", 5 },
+            { "==", 1 }, { "!=", 1 }, { "<=", 1 }, { ">=", 1 }, { ":=", 0 },
+            { "**", 5 }, { "as", 5 },
+            { "@", 6 },
+            { "+", 3 }, { "-", 3 }, { "*", 4 }, { "/", 4 }, { "^", 5 }, { "=", 0 },
+            { ">", 1}, { "<", 1 }, 
+        };
+
+        struct Bound_Operator {
+            enum Variant {
+                Once, Multiple, Close
+            };
+            struct Node {
+                std::string name;
+                Variant variant;
+            };
+            std::vector<Node> nodes;
+        };
+
+
+        std::vector<Bound_Operator> bound_operators = {
+            {{{"if", Bound_Operator::Once}, {"then", Bound_Operator::Once}, {"else", Bound_Operator::Once}}},
+            {{{"let", Bound_Operator::Once}, {"in", Bound_Operator::Once}}},
+            {{{"[", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {"]", Bound_Operator::Close}}},
+            {{{"(", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {")", Bound_Operator::Close}}},
+            {{{"<", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {">", Bound_Operator::Close}}},
+            {{{"{", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {"}", Bound_Operator::Close}}},
+        };
+
+        Top_Level_Statement::Variant read_variant(std::string_view stmt);
+
+        Top_Level_Statement::Table_Data parse_table(std::string_view view);
+
+        Top_Level_Statement::Domain_Data parse_domain(std::string_view view);
+
+        Top_Level_Statement::Expression_Data parse_call(std::string_view view);
+
+        static std::unique_ptr<Syntax_Tree> parse(const std::string &source);
+
+        private:
+            std::pair<std::string_view, Top_Level_Statement::Expression_Data::kind>
+                read_literal(std::string_view view);
+
+            std::string_view read_operator(std::string_view view);
+
+            Operator get_operator(std::string_view view);
+
+            std::string_view read_node(std::string_view view, const Bound_Operator &op, size_t &idx);
+
+            std::vector<std::string_view> read_bound_operator(std::string_view view);
+    };
+
+
+    std::ostream& operator<<(std::ostream& os, const Syntax_Tree& tree);
 
 
     std::string_view trim_left(std::string_view str);

@@ -111,7 +111,7 @@ namespace toad_db::parser {
         return read_until(trim_left(str), ';');
     }
 
-    Top_Level_Statement::Variant read_variant(std::string_view stmt) {
+    Top_Level_Statement::Variant Syntax_Tree::read_variant(std::string_view stmt) {
         if (stmt.starts_with("table")) {
             return Top_Level_Statement::Variant::Table_Define;
         }
@@ -172,7 +172,7 @@ namespace toad_db::parser {
         return ret;
 	}
 
-    Top_Level_Statement::Table_Data parse_table(std::string_view view) {
+    Top_Level_Statement::Table_Data Syntax_Tree::parse_table(std::string_view view) {
         Top_Level_Statement::Table_Data data { };
         auto full_view = view;
 
@@ -273,7 +273,7 @@ namespace toad_db::parser {
         return data;
     }
 
-    Top_Level_Statement::Domain_Data parse_domain(std::string_view view) {
+    Top_Level_Statement::Domain_Data Syntax_Tree::parse_domain(std::string_view view) {
         Top_Level_Statement::Domain_Data data { };
         auto full_view = view;
 
@@ -358,27 +358,9 @@ namespace toad_db::parser {
         return data;
     }
 
-    std::string_view read_before_closes(std::string_view view, char open, char close) {
-        size_t counter = 1, end = 0;
-
-        while (end < view.size() && counter != 0) {
-            if (view[end] == open) counter++;
-            if (view[end] == close) counter--;
-            end++;
-        }
-
-        if (counter > 0) throw Expected_Char(close, 
-            std::string("\t") + std::to_string(open) + " ... " + std::to_string(close) + "\n" +
-            "\t      ^ -- expected `" + std::to_string(close) + "`\n",
-            error_help(view, {view.end()-1, view.end()-1})
-            );
-
-        return { view.begin(), view.begin() + end };
-    }
-
 
     std::pair<std::string_view, Top_Level_Statement::Expression_Data::kind>
-    read_literal(std::string_view view) {
+        Syntax_Tree::read_literal(std::string_view view) {
         using Kind = Top_Level_Statement::Expression_Data::kind;
 
         view = trim_left(view);
@@ -402,22 +384,8 @@ namespace toad_db::parser {
         return {{ view.begin(), view.begin() }, Kind::Err };
     }
 
-    struct Operator {
-        std::string name;
-        size_t order;
-        enum Kind { Bynary=0, Prefix, Postfix } kind=Bynary;
-    };
 
-    static const std::vector<Operator> operators = {
-        { "with", 5 },
-        { "==", 1 }, { "!=", 1 }, { "<=", 1 }, { ">=", 1 }, { ":=", 0 },
-        { "**", 5 }, { "as", 5 },
-        { "@", 6 },
-        { "+", 3 }, { "-", 3 }, { "*", 4 }, { "/", 4 }, { "^", 5 }, { "=", 0 },
-        { ">", 1}, { "<", 1 }, 
-    };
-
-    std::string_view read_operator(std::string_view view) {
+    std::string_view Syntax_Tree::read_operator(std::string_view view) {
         view = trim_left(view);
 
         auto op = std::find_if(operators.begin(), operators.end(), [&view] (auto &op)
@@ -430,7 +398,7 @@ namespace toad_db::parser {
         return { view.begin(), view.begin() + op->name.size() };
     }
 
-    Operator get_operator(std::string_view view) {
+    Syntax_Tree::Operator Syntax_Tree::get_operator(std::string_view view) {
         view = trim_left(view);
 
         auto op = std::find_if(operators.begin(), operators.end(), [&view] (auto &op)
@@ -443,47 +411,8 @@ namespace toad_db::parser {
         return *op;
     }
 
-    bool operator_expect_args(std::string_view view, size_t args) {
 
-        switch (get_operator(view).kind) {
-        case Operator::Bynary: return args < 2;
-        case Operator::Prefix:
-        case Operator::Postfix: return args < 1;
-        }
-    }
-
-    struct Bound_Operator {
-        enum Variant {
-            Once, Multiple, Close
-        };
-        struct Node {
-            std::string name;
-            Variant variant;
-        };
-        std::vector<Node> nodes;
-    };
-
-
-    static const std::vector<Bound_Operator> bound_operators = {
-        {{{"if", Bound_Operator::Once}, {"then", Bound_Operator::Once}, {"else", Bound_Operator::Once}}},
-        {{{"let", Bound_Operator::Once}, {"in", Bound_Operator::Once}}},
-        {{{"[", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {"]", Bound_Operator::Close}}},
-        {{{"(", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {")", Bound_Operator::Close}}},
-        {{{"<", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {">", Bound_Operator::Close}}},
-        {{{"{", Bound_Operator::Once}, {",", Bound_Operator::Multiple}, {"}", Bound_Operator::Close}}},
-    };
-    // [( | , | ; | )]
-    // [( a, b, c, d; a; d; c )]
-
-    std::string_view read_until(std::string_view view, std::function<bool (std::string_view)> pred) {
-        std::string_view ret = view;
-
-        while (view.begin() != view.end() && !pred(view)) view.remove_prefix(1);
-
-        return trim_left({ ret.begin(), view.begin() });
-    }
-
-    std::string_view read_node(std::string_view view, const Bound_Operator &op, size_t &idx) {
+    std::string_view Syntax_Tree::read_node(std::string_view view, const Bound_Operator &op, size_t &idx) {
         int level = 0;
         auto start = view.begin();
 
@@ -515,7 +444,7 @@ namespace toad_db::parser {
         return { start, view.begin() };
     }
 
-    std::vector<std::string_view> read_bound_operator(std::string_view view) {
+    std::vector<std::string_view> Syntax_Tree::read_bound_operator(std::string_view view) {
         auto full_view = view;
         view = trim_left(view);
         auto op = std::find_if(bound_operators.begin(), bound_operators.end(),
@@ -547,7 +476,8 @@ namespace toad_db::parser {
         return ret;
     }
 
-    Top_Level_Statement::Expression_Data parse_call(std::string_view view) {
+
+    Top_Level_Statement::Expression_Data Syntax_Tree::parse_call(std::string_view view) {
         using Expression_Data = Top_Level_Statement::Expression_Data;
         std::string_view full_view = view;
 
@@ -555,7 +485,7 @@ namespace toad_db::parser {
         Expression_Data::pointer curr;
         Expression_Data root {};
 
-        const auto push_node = [&root, &curr](auto node) -> void {
+        const auto push_node = [&root, &curr, this](auto node) -> void {
             if (root.root->args.size() == 0) {
                 root.root->args.push_back(node);
                 curr = node;
@@ -569,7 +499,7 @@ namespace toad_db::parser {
             auto prev = root.root;
             curr = root.root->args[0];
             while (curr->kind == Expression_Data::kind::Operator
-                   && get_operator(curr->name).order < get_operator(node->name).order) {
+                   && this->get_operator(curr->name).order < this->get_operator(node->name).order) {
 
                 if (curr->args.size() == 0) {
                     prev = curr;
@@ -593,19 +523,6 @@ namespace toad_db::parser {
 
         while (view.size() > 0 && view[0] != ';') {
             view = trim_left(view); 
-
-            /*if (view.size() > 0 && view[0] == ')') {
-                view.remove_prefix(1); 
-                continue;
-            }
-            if (view.size() > 0 && view[0] == '(') {
-                auto sub_expression_view = read_before_closes({view.begin()+1, view.end()}, '(', ')'); 
-                auto sub_expression = parse_call(sub_expression_view);
-
-                push_node( sub_expression.root );
-                view = { sub_expression_view.end(), view.end() };
-                continue;
-            }*/
 
             auto bop_views = read_bound_operator(view);
             if (bop_views.size() > 0) {
@@ -666,7 +583,7 @@ namespace toad_db::parser {
         return { root };
     }
 
-    std::unique_ptr<Syntax_Tree> parse(const std::string &source) {
+    std::unique_ptr<Syntax_Tree> Syntax_Tree::parse(const std::string &source) {
         auto tree = std::make_unique<Syntax_Tree>(Syntax_Tree {});
 
         tree->content = source;
@@ -677,17 +594,17 @@ namespace toad_db::parser {
             std::string_view stmt = read_stmt(code);
             if (stmt.size() == 0) break;
 
-            switch (read_variant(stmt)) {
+            switch (tree->read_variant(stmt)) {
             case Top_Level_Statement::Table_Define: {
-                tree->stmts.push_back(Top_Level_Statement { parse_table(stmt) });
+                tree->stmts.push_back(Top_Level_Statement { tree->parse_table(stmt) });
             } break;
 
             case Top_Level_Statement::Domain_Define: {
-                tree->stmts.push_back(Top_Level_Statement { parse_domain(stmt) });
+                tree->stmts.push_back(Top_Level_Statement { tree->parse_domain(stmt) });
             } break;
 
             case Top_Level_Statement::Call: {
-                tree->stmts.push_back(Top_Level_Statement { parse_call(stmt) });
+                tree->stmts.push_back(Top_Level_Statement { tree->parse_call(stmt) });
             } break;
 
             case Top_Level_Statement::Function_Define:
